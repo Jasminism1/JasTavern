@@ -39,6 +39,9 @@
 
       <!-- API 设置 -->
       <ApiPanel v-if="activeTab === 'api'" />
+
+      <!-- 请求日志 -->
+      <RequestLogPanel v-if="activeTab === 'log'" />
     </div>
   </div>
   <!-- 保存按钮（调整布局结构，仅改外层容器类名） -->
@@ -57,6 +60,7 @@ import BackgroundPanel from './SettingsPanelComponents/BackgroundPanel.vue'
 import RecallingPanel from './SettingsPanelComponents/RecallingPanel.vue'
 import OtherPanel from './SettingsPanelComponents/OtherPanel.vue'
 import ApiPanel from './SettingsPanelComponents/ApiPanel.vue'
+import RequestLogPanel from './SettingsPanelComponents/RequestLogPanel.vue'
 
 // 使用设置状态管理（如果需要全局共享设置状态）
 const settingsStore = useSettingsStore()
@@ -69,6 +73,7 @@ const tabs = ref([
   { key: 'interface', name: '界面' },
   { key: 'recall', name: '回想' },
   { key: 'api', name: 'API' },
+  { key: 'log', name: '日志' },
   { key: 'other', name: '其他' }
 ])
 // 默认激活的标签（界面）

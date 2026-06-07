@@ -10,6 +10,7 @@ import {
 import { useConversationTreeStore } from '../stores/conversationTree';
 import { isInSillyTavern, syncFromSt } from '../sillytavern/st-integration';
 import { loadApiConfig } from '../stores/apiStorage';
+import { logRequest, logResponse, logError, logInfo } from '../stores/requestLogger';
 
 export function useSillytavern() {
   const lorebooks = ref<Lorebook[]>([]);
@@ -190,9 +191,10 @@ export function useSillytavern() {
         variables: currentVariables,
       });
 
-      // 5. Build API request
+      // 5. Build API request — user's configured model takes priority over preset default
+      const activeModel = apiConfig.model || activePreset.settings.openai_model;
       const requestBody: Record<string, any> = {
-        model: activePreset.settings.openai_model || apiConfig.model,
+        model: activeModel,
         messages: promptMessages,
       };
       if (activePreset.settings.temp_openai !== undefined) requestBody.temperature = activePreset.settings.temp_openai;
@@ -201,6 +203,9 @@ export function useSillytavern() {
       if (activePreset.settings.freq_pen_openai !== undefined) requestBody.frequency_penalty = activePreset.settings.freq_pen_openai;
       if (activePreset.settings.pres_pen_openai !== undefined) requestBody.presence_penalty = activePreset.settings.pres_pen_openai;
       if (activePreset.settings.stream_openai !== undefined) requestBody.stream = activePreset.settings.stream_openai;
+
+      // 6. Log the request
+      logRequest(apiEndpoint, { model: activeModel, messageCount: promptMessages.length, systemPrompt: promptMessages.filter(m => m.role === 'system').map(m => m.content.slice(0, 200)).join('\n---\n') });
 
       // 7. Call API
       let rawReply: string;
@@ -215,12 +220,17 @@ export function useSillytavern() {
           body: JSON.stringify(requestBody),
         });
 
-        if (!response.ok) throw new Error(`API error: ${response.status}`);
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => '(no body)');
+          logError(`HTTP ${response.status} — ${errorText.slice(0, 500)}`);
+          throw new Error(`API error: ${response.status}`);
+        }
 
         const data = await response.json();
         rawReply = data.choices?.[0]?.message?.content || '';
+        logResponse(response.status, rawReply.slice(0, 2000));
       } catch (err) {
-        console.error('[useSillytavern] API call failed:', err);
+        logError(String(err));
         throw err;
       }
       const { cleanedText: reply, updates: extractedVars } = extractVariables(rawReply);
