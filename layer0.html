@@ -355,13 +355,13 @@
         // ST 数据桥：读取顶层窗口的 SillyTavern 数据，
         // 通过 postMessage 传入跨域 iframe
         // ==============================================
-        iframe.addEventListener('load', () => {
+        iframe.addEventListener('load', async () => {
             try {
-                const stData = readStContext(topWindow);
+                const stData = await readStContext(topWindow);
                 if (stData) {
                     iframe.contentWindow.postMessage(
                         { type: 'st-context', data: stData },
-                        '*' // cross-origin — receiver validates
+                        '*'
                     );
                     console.log('[入口前端] ST 上下文已发送到 UI iframe');
                 } else {
@@ -381,9 +381,111 @@
     }
 
     // ==============================================
+    // 从顶层窗口 IndexedDB 读取 ST 设置
+    // ==============================================
+    async function readSTIndexedDBSettings(topWindow) {
+        var dbNames = ['SillyTavern', 'TavernAI', 'SillyTavernDB', 'st_main'];
+        // Also try to discover actual DB names
+        try {
+            if (topWindow.indexedDB && topWindow.indexedDB.databases) {
+                var allDbs = await topWindow.indexedDB.databases();
+                for (var di = 0; di < allDbs.length; di++) {
+                    dbNames.push(allDbs[di].name);
+                }
+            }
+        } catch(e) {}
+
+        for (var di = 0; di < dbNames.length; di++) {
+            try {
+                var db = await new Promise(function(resolve, reject) {
+                    var req = topWindow.indexedDB.open(dbNames[di]);
+                    req.onsuccess = function() { resolve(req.result); };
+                    req.onerror = function() { resolve(null); };
+                    req.onblocked = function() { resolve(null); };
+                });
+                if (!db) continue;
+
+                // Check for 'settings' object store
+                var storeNames = Array.from(db.objectStoreNames || []);
+                for (var si = 0; si < storeNames.length; si++) {
+                    try {
+                        var records = await new Promise(function(res, rej) {
+                            var tx = db.transaction(storeNames[si], 'readonly');
+                            var store = tx.objectStore(storeNames[si]);
+                            var getAll = store.getAll();
+                            getAll.onsuccess = function() { res(getAll.result); };
+                            getAll.onerror = function() { rej(getAll.error); };
+                        });
+                        if (records && records.length > 0) {
+                            // Look for objects that look like ST settings
+                            for (var ri = 0; ri < records.length; ri++) {
+                                var r = records[ri];
+                                if (r && typeof r === 'object' && (r.main || r.prompt_order || r.temperature || r.temp_openai)) {
+                                    db.close();
+                                    return r;
+                                }
+                            }
+                        }
+                    } catch(e) {}
+                }
+                db.close();
+            } catch(e) {}
+        }
+        return null;
+    }
+
+    // ==============================================
+    // 从顶层窗口 IndexedDB 读取 ST 世界书
+    // ==============================================
+    async function readSTIndexedDBWorldInfo(topWindow) {
+        try {
+            if (!topWindow.indexedDB || !topWindow.indexedDB.databases) return null;
+            var allDbs = await topWindow.indexedDB.databases();
+            for (var di = 0; di < allDbs.length; di++) {
+                try {
+                    var dbName = allDbs[di].name;
+                    var db = await new Promise(function(resolve, reject) {
+                        var req = topWindow.indexedDB.open(dbName);
+                        req.onsuccess = function() { resolve(req.result); };
+                        req.onerror = function() { resolve(null); };
+                        req.onblocked = function() { resolve(null); };
+                    });
+                    if (!db) continue;
+                    var storeNames = Array.from(db.objectStoreNames || []);
+                    for (var si = 0; si < storeNames.length; si++) {
+                        try {
+                            var storeName = storeNames[si];
+                            var records = await new Promise(function(res, rej) {
+                                var tx = db.transaction(storeName, 'readonly');
+                                var store = tx.objectStore(storeName);
+                                var getAll = store.getAll();
+                                getAll.onsuccess = function() { res(getAll.result); };
+                                getAll.onerror = function() { rej(getAll.error); };
+                            });
+                            if (records && records.length > 0) {
+                                for (var ri = 0; ri < records.length; ri++) {
+                                    var r = records[ri];
+                                    if (r && typeof r === 'object' && (r.entries || (r.key && r.content))) {
+                                        db.close();
+                                        // If it's a single entry, wrap it
+                                        if (r.key && r.content) return { name: 'ST 世界书', entries: { '0': r } };
+                                        return r;
+                                    }
+                                }
+                            }
+                        } catch(e) {}
+                    }
+                    db.close();
+                } catch(e) {}
+            }
+        } catch(e) {}
+        return null;
+    }
+
+    // ==============================================
     // 从顶层窗口读取 ST 完整上下文（全面扫描所有数据源）
     // ==============================================
-    function readStContext(topWindow) {
+    async function readStContext(topWindow) {
         try {
             var st = topWindow.SillyTavern;
             if (!st) { console.log('[入口前端] window.SillyTavern 不存在'); return null; }
@@ -416,12 +518,19 @@
                 });
             }
 
-            // ---- 世界书：多条路径尝试 ----
+            // ---- 世界书：多条路径 + IndexedDB ----
             // 1. ctx.worldInfo (live object)
             if (ctx.worldInfo && typeof ctx.worldInfo === 'object') {
                 try {
                     result.worldInfo = JSON.parse(JSON.stringify(ctx.worldInfo));
                     result._sources.worldInfo = 'ctx.worldInfo';
+                } catch(e) {}
+            }
+            // 2. IndexedDB
+            if (!result.worldInfo) {
+                try {
+                    result.worldInfo = await readSTIndexedDBWorldInfo(topWindow);
+                    if (result.worldInfo) result._sources.worldInfo = 'indexeddb';
                 } catch(e) {}
             }
             // 2. 扫描所有 localStorage key
@@ -458,8 +567,15 @@
                 }
             }
 
-            // ---- ST 全局设置：多条路径 ----
-            // 1. 扫描 localStorage 中所有可能的设置 key
+            // ---- ST 全局设置：多条路径 + IndexedDB 扫描 ----
+            // Try to read settings from IndexedDB first (ST stores config there)
+            try {
+                result.settings = await readSTIndexedDBSettings(topWindow);
+                result._sources.settings = 'indexeddb';
+            } catch(e) {}
+
+            // Then try localStorage paths
+            if (!result.settings) {
             var settingsKeys = [
                 'SillyTavern_settings', 'settings', 'STSettings',
                 'st_settings', 'tavern_settings', 'TavernAI_settings',
@@ -479,7 +595,7 @@
                     }
                 } catch(e) {}
             }
-            // 2. 扫描所有含 'setting' 或 'tavern' 或 'ST' 前缀的 key
+            // scan all ls keys
             if (!result.settings) {
                 for (var sj = 0; sj < ls.length && !result.settings; sj++) {
                     var skey = ls.key(sj);
@@ -500,11 +616,11 @@
                     }
                 }
             }
-            // 3. 从 ctx 直接读取
             if (!result.settings && ctx.settings) {
                 result.settings = JSON.parse(JSON.stringify(ctx.settings));
                 result._sources.settings = 'ctx.settings';
             }
+            } // end !result.settings from IDB
 
             // ---- 对话历史 ----
             try {
@@ -523,7 +639,12 @@
                 settingsSource: result._sources.settings,
                 chatCount: result.chat ? result.chat.length : 0,
                 // List all localStorage keys for debugging
-                allLSKeys: (function() { var keys=[]; for(var i=0;i<ls.length;i++) keys.push(ls.key(i)); return keys; })()
+                allLSKeys: (function() { var keys=[]; for(var i=0;i<ls.length;i++) keys.push(ls.key(i)); return keys; })(),
+                // List IndexedDB database names
+                idbNames: await (async function() {
+                    try { if (topWindow.indexedDB && topWindow.indexedDB.databases) { var dbs = await topWindow.indexedDB.databases(); return dbs.map(function(d) { return d.name; }); } } catch(e) {}
+                    return [];
+                })()
             });
 
             return result;
