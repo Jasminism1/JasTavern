@@ -9,6 +9,7 @@ import {
 } from '../sillytavern';
 import { useConversationTreeStore } from '../stores/conversationTree';
 import { isInSillyTavern, syncFromSt } from '../sillytavern/st-integration';
+import { loadApiConfig } from '../stores/apiStorage';
 
 export function useSillytavern() {
   const lorebooks = ref<Lorebook[]>([]);
@@ -140,6 +141,20 @@ export function useSillytavern() {
     if (!s || !ac) {
       throw new Error('No active chat or settings not loaded');
     }
+
+    // Read API credentials from secure local storage
+    const apiConfig = await loadApiConfig();
+    if (!apiConfig || !apiConfig.apiKey || !apiConfig.baseUrl) {
+      throw new Error('未配置 API Key。请在设置 → API 中配置。');
+    }
+
+    // Resolve endpoint URL (auto-complete /chat/completions)
+    let apiEndpoint = apiConfig.baseUrl;
+    if (apiEndpoint.endsWith('/')) apiEndpoint = apiEndpoint.slice(0, -1);
+    apiEndpoint = apiEndpoint.endsWith('/v1')
+      ? apiEndpoint + '/chat/completions'
+      : apiEndpoint + '/chat/completions';
+
     isSending.value = true;
 
     try {
@@ -177,7 +192,7 @@ export function useSillytavern() {
 
       // 5. Build API request
       const requestBody: Record<string, any> = {
-        model: activePreset.settings.openai_model || s.api.model,
+        model: activePreset.settings.openai_model || apiConfig.model,
         messages: promptMessages,
       };
       if (activePreset.settings.temp_openai !== undefined) requestBody.temperature = activePreset.settings.temp_openai;
@@ -187,35 +202,26 @@ export function useSillytavern() {
       if (activePreset.settings.pres_pen_openai !== undefined) requestBody.presence_penalty = activePreset.settings.pres_pen_openai;
       if (activePreset.settings.stream_openai !== undefined) requestBody.stream = activePreset.settings.stream_openai;
 
-      // 6. Always use user-configured API key
-      // (ST never exposes real API keys to frontend JS)
-      const apiBaseUrl = s.api.baseUrl;
-      const apiKey = s.api.apiKey;
-
       // 7. Call API
       let rawReply: string;
 
-      if (apiKey && apiBaseUrl) {
-        try {
-          const response = await fetch(apiBaseUrl + '/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${apiKey}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(requestBody),
-          });
+      try {
+        const response = await fetch(apiEndpoint, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiConfig.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
+        });
 
-          if (!response.ok) throw new Error(`API error: ${response.status}`);
+        if (!response.ok) throw new Error(`API error: ${response.status}`);
 
-          const data = await response.json();
-          rawReply = data.choices?.[0]?.message?.content || '';
-        } catch (err) {
-          console.error('[useSillytavern] API call failed:', err);
-          throw err;
-        }
-      } else {
-        throw new Error('未配置 API Key。请在设置 → API 中配置。');
+        const data = await response.json();
+        rawReply = data.choices?.[0]?.message?.content || '';
+      } catch (err) {
+        console.error('[useSillytavern] API call failed:', err);
+        throw err;
       }
       const { cleanedText: reply, updates: extractedVars } = extractVariables(rawReply);
       const nextVariables = mergeVariables(currentVariables, extractedVars);
