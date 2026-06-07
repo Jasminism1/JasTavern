@@ -148,12 +148,12 @@ export function useSillytavern() {
       throw new Error('未配置 API Key。请在设置 → API 中配置。');
     }
 
-    // Resolve endpoint URL (auto-complete /chat/completions)
+    // Resolve endpoint URL: only append /chat/completions if not already present
     let apiEndpoint = apiConfig.baseUrl;
     if (apiEndpoint.endsWith('/')) apiEndpoint = apiEndpoint.slice(0, -1);
-    apiEndpoint = apiEndpoint.endsWith('/v1')
-      ? apiEndpoint + '/chat/completions'
-      : apiEndpoint + '/chat/completions';
+    if (!apiEndpoint.endsWith('/chat/completions')) {
+      apiEndpoint = apiEndpoint + '/chat/completions';
+    }
 
     isSending.value = true;
 
