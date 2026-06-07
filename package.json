@@ -6,6 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "postbuild": "node scripts/build-dist-html.js",
+    "deploy": "npm run build && bash scripts/deploy-gh-pages.sh",
     "preview": "vite preview"
   },
   "dependencies": {
