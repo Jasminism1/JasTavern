@@ -159,28 +159,22 @@ export function readStPreset(): { preset: Omit<ChatPreset, 'id' | 'createdAt' | 
   const char = getChar() || readStCharacter();
   const presetName = char?.name ? `${char.name} 的 ST 预设` : 'ST 导入预设';
 
+  // Start from the raw ST settings object, then fill missing fields with defaults
   const settings: Record<string, any> = {
-    main: stSettings.main || stSettings.main_prompt || 'Write {{char}}\'s next reply in a fictional chat between {{char}} and {{user}}.',
-    temp_openai: stSettings.temp_openai ?? stSettings.temperature ?? 0.8,
-    openai_max_context: stSettings.openai_max_context ?? stSettings.max_context ?? 4096,
-    openai_max_tokens: stSettings.openai_max_tokens ?? stSettings.max_tokens ?? 2048,
-    openai_model: stSettings.openai_model ?? 'gpt-3.5-turbo',
-    chat_completion_source: 'openai',
+    ...stSettings,  // Spread ALL raw IDB data — ST may use various key names
+    // Fill in defaults for the most critical fields if missing
+    main: stSettings.main || stSettings.main_prompt || stSettings.openai_main || 'Write {{char}}\'s next reply in a fictional chat between {{char}} and {{user}}.',
+    chat_completion_source: stSettings.chat_completion_source || 'openai',
   };
 
-  // Only copy safe ST settings (strings, numbers) — skip complex objects
-  const SAFE_KEYS = [
-    'main', 'nsfw', 'jailbreak', 'enhanceDefinitions', 'impersonation_prompt',
-    'new_chat_prompt', 'new_group_chat_prompt', 'new_example_chat_prompt',
-    'continue_nudge_prompt', 'wi_format', 'group_nudge_prompt',
-    'scenario_format', 'personality_format',
-  ];
-  for (const key of SAFE_KEYS) {
-    if (typeof stSettings[key] === 'string' && stSettings[key].trim()) {
-      settings[key] = stSettings[key];
-    }
-  }
+  // Ensure sampling params have fallbacks (check common ST key variants)
+  if (!('temp_openai' in settings) && 'openai_temp' in stSettings) settings.temp_openai = stSettings.openai_temp;
+  if (!('temp_openai' in settings)) settings.temp_openai = stSettings.temperature ?? 0.8;
+  if (!('openai_max_context' in settings)) settings.openai_max_context = stSettings.max_context ?? 4096;
+  if (!('openai_max_tokens' in settings)) settings.openai_max_tokens = stSettings.max_tokens ?? 2048;
+  if (!('openai_model' in settings)) settings.openai_model = stSettings.model ?? 'gpt-3.5-turbo';
 
+  // Character overrides from bridge data
   if (characterOverrides.character_description) settings.character_description = characterOverrides.character_description;
   if (characterOverrides.character_personality) settings.character_personality = characterOverrides.character_personality;
   if (characterOverrides.scenario) settings.scenario = characterOverrides.scenario;
@@ -277,15 +271,37 @@ export async function syncFromSt(
 
   if (!isInSillyTavern()) return result;
 
-  // A. Update settings with ST character name
+  // A. Update settings with ST character name + auto-activate imported data
   const settings = await context.getSettings();
   if (settings) {
     const char = readStCharacter();
+    let settingsChanged = false;
     if (char?.name && settings.characterName === 'AI') {
       settings.characterName = char.name;
-      await context.saveSettings(sanitize(settings));
+      settingsChanged = true;
     }
     result.characterName = char?.name || null;
+
+    // Auto-activate imported lorebooks
+    const allBooks = await context.getLorebooks();
+    const newBookIds = allBooks.map(b => b.id);
+    const currentIds = settings.activeLorebookIds || [];
+    const missingIds = newBookIds.filter(id => !currentIds.includes(id));
+    if (missingIds.length > 0) {
+      settings.activeLorebookIds = [...currentIds, ...missingIds];
+      settingsChanged = true;
+    }
+
+    // Auto-set first preset as active
+    const presets = await context.getPresets();
+    if (presets.length > 0 && !settings.activePresetId) {
+      settings.activePresetId = presets[0].id;
+      settingsChanged = true;
+    }
+
+    if (settingsChanged) {
+      await context.saveSettings(sanitize(settings));
+    }
   }
 
   // B. Import preset from ST (always update first preset with ST data)

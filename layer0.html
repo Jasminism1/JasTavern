@@ -384,46 +384,40 @@
     // 从顶层窗口 IndexedDB 读取 ST 设置
     // ==============================================
     async function readSTIndexedDBSettings(topWindow) {
-        var dbNames = ['SillyTavern', 'TavernAI', 'SillyTavernDB', 'st_main'];
-        // Also try to discover actual DB names
-        try {
-            if (topWindow.indexedDB && topWindow.indexedDB.databases) {
-                var allDbs = await topWindow.indexedDB.databases();
-                for (var di = 0; di < allDbs.length; di++) {
-                    dbNames.push(allDbs[di].name);
-                }
-            }
-        } catch(e) {}
-
-        for (var di = 0; di < dbNames.length; di++) {
+        // ST stores presets in specific databases. Try known names first.
+        var dbNameStoreMap = {
+            'SillyTavern_ChatCompletions': ['presets', 'ChatCompletions', 'chat_completions'],
+            'SillyTavern_Prompts': ['prompts', 'Prompts'],
+            'SillyTavern_TextCompletions': ['presets', 'TextCompletions'],
+            'SillyTavern': ['settings', 'Settings', 'presets', 'Presets'],
+            'st_main': ['settings', 'Settings'],
+        };
+        for (var dbName in dbNameStoreMap) {
             try {
-                var db = await new Promise(function(resolve, reject) {
-                    var req = topWindow.indexedDB.open(dbNames[di]);
+                var storeNames = dbNameStoreMap[dbName];
+                var db = await new Promise(function(resolve) {
+                    var req = topWindow.indexedDB.open(dbName);
                     req.onsuccess = function() { resolve(req.result); };
                     req.onerror = function() { resolve(null); };
                     req.onblocked = function() { resolve(null); };
                 });
                 if (!db) continue;
-
-                // Check for 'settings' object store
-                var storeNames = Array.from(db.objectStoreNames || []);
                 for (var si = 0; si < storeNames.length; si++) {
                     try {
-                        var records = await new Promise(function(res, rej) {
+                        if (!db.objectStoreNames.contains(storeNames[si])) continue;
+                        var records = await new Promise(function(res) {
                             var tx = db.transaction(storeNames[si], 'readonly');
                             var store = tx.objectStore(storeNames[si]);
                             var getAll = store.getAll();
                             getAll.onsuccess = function() { res(getAll.result); };
-                            getAll.onerror = function() { rej(getAll.error); };
+                            getAll.onerror = function() { res(null); };
                         });
                         if (records && records.length > 0) {
-                            // Look for objects that look like ST settings
-                            for (var ri = 0; ri < records.length; ri++) {
-                                var r = records[ri];
-                                if (r && typeof r === 'object' && (r.main || r.prompt_order || r.temperature || r.temp_openai)) {
-                                    db.close();
-                                    return r;
-                                }
+                            // Return the first record that's an object (most presets are the first item)
+                            if (records[0] && typeof records[0] === 'object') {
+                                db.close();
+                                console.log('[入口前端] ST 设置来源: ' + dbName + '/' + storeNames[si], records[0]);
+                                return records[0];
                             }
                         }
                     } catch(e) {}
@@ -431,6 +425,45 @@
                 db.close();
             } catch(e) {}
         }
+        // Fallback: scan all IDB databases generically
+        try {
+            if (topWindow.indexedDB && topWindow.indexedDB.databases) {
+                var allDbs = await topWindow.indexedDB.databases();
+                for (var di = 0; di < allDbs.length; di++) {
+                    var db2 = await new Promise(function(resolve) {
+                        var req = topWindow.indexedDB.open(allDbs[di].name);
+                        req.onsuccess = function() { resolve(req.result); };
+                        req.onerror = function() { resolve(null); };
+                        req.onblocked = function() { resolve(null); };
+                    });
+                    if (!db2) continue;
+                    var sNames = Array.from(db2.objectStoreNames || []);
+                    for (var sj = 0; sj < sNames.length; sj++) {
+                        try {
+                            var recs = await new Promise(function(res) {
+                                var tx = db2.transaction(sNames[sj], 'readonly');
+                                var store = tx.objectStore(sNames[sj]);
+                                var getAll = store.getAll();
+                                getAll.onsuccess = function() { res(getAll.result); };
+                                getAll.onerror = function() { res(null); };
+                            });
+                            if (recs) {
+                                for (var rj = 0; rj < recs.length; rj++) {
+                                    var r = recs[rj];
+                                    if (r && typeof r === 'object' && !Array.isArray(r) && Object.keys(r).length > 3) {
+                                        // Accept any non-trivial object as potential settings
+                                        db2.close();
+                                        console.log('[入口前端] ST 设置来源(gen): ' + allDbs[di].name + '/' + sNames[sj], r);
+                                        return r;
+                                    }
+                                }
+                            }
+                        } catch(e) {}
+                    }
+                    db2.close();
+                }
+            }
+        } catch(e) {}
         return null;
     }
 
@@ -567,11 +600,13 @@
                 }
             }
 
-            // ---- ST 全局设置：多条路径 + IndexedDB 扫描 ----
-            // Try to read settings from IndexedDB first (ST stores config there)
+            // ---- ST 全局设置：IndexedDB 优先 ----
             try {
-                result.settings = await readSTIndexedDBSettings(topWindow);
-                result._sources.settings = 'indexeddb';
+                var idbSettings = await readSTIndexedDBSettings(topWindow);
+                if (idbSettings) {
+                    result.settings = idbSettings;
+                    result._sources.settings = 'indexeddb';
+                }
             } catch(e) {}
 
             // Then try localStorage paths
