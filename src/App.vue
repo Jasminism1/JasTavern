@@ -45,7 +45,7 @@
 import { computed, ref } from 'vue'
 import { useAppStore }        from './stores/app'
 import { useBackgroundStore } from './stores/background'
-import { isInSillyTavern }    from './bridge'
+import { isInSillyTavern }    from './env'
 import TopBar        from './components/TopBar.vue'
 import PortraitLayer from './components/PortraitLayer.vue'
 import DialoguePanel from './components/DialoguePanel.vue'

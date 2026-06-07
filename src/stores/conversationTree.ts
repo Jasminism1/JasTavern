@@ -169,6 +169,8 @@ export const useConversationTreeStore = defineStore('conversationTree', () => {
       content,
       inputTokens: tokens?.input ?? 0,
       outputTokens: tokens?.output ?? 0,
+      isSummarized: false,
+      summaryContent: '',
     })
   }
 

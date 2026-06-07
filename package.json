@@ -8,6 +8,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "dexie": "^4.4.3",
     "pinia": "^2.1.0",
     "vue": "^3.4.0"
   },

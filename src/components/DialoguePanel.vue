@@ -59,9 +59,11 @@
 import { ref, watch, nextTick, computed, onMounted, onUnmounted } from 'vue'
 import { useAppStore } from '../stores/app'
 import { useConversationTreeStore } from '../stores/conversationTree'
+import { useSillytavern } from '../composables/useSillytavern'
 
 const store = useAppStore()
 const tree = useConversationTreeStore()
+const st = useSillytavern()
 const listRef = ref<HTMLElement | null>(null)
 const inputText = ref('')
 const activeTab = ref('choices')
@@ -178,21 +180,26 @@ async function sendMessage() {
   const text = inputText.value.trim()
   if (!text || isGenerating.value) return
 
-  // Ensure tree is initialized
-  tree.ensureRoot()
-
-  // Add user message as child of active node
-  tree.onNewMessage(text, 'user')
-
   inputText.value = ''
   store.isGenerating = true
-  store.streamText = ''
 
-  // Mock AI response — replace with SillyTavern bridge call
-  await new Promise(r => setTimeout(r, 800))
-  const aiText = `（回复：${text}）`
-  tree.onNewMessage(aiText, 'assistant', { input: 300, output: aiText.length })
-  store.isGenerating = false
+  try {
+    // Ensure an active chat exists (create one lazily if needed)
+    if (!st.activeChat.value) {
+      await st.createChat()
+    }
+
+    const result = await st.sendMessage(text)
+    // The conversationTree has been updated by sendMessage,
+    // the UI picks it up via the computed messages.
+    // For streaming display, we'll set streamText for now
+    store.streamText = result.reply
+  } catch (err) {
+    console.error('[DialoguePanel] Send failed:', err)
+  } finally {
+    store.isGenerating = false
+    store.streamText = ''
+  }
 }
 </script>
 

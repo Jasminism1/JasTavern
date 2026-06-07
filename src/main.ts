@@ -2,12 +2,14 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
-import { initBridge, isInSillyTavern } from './bridge'
+import { isInSillyTavern } from './env'
 import { useAppStore } from './stores/app'
+import { initializeDatabase } from './sillytavern'
 
-function mountApp() {
-  initBridge()
-  
+async function mountApp() {
+  // Initialize SillyTavern database (lorebooks / presets / settings / chats)
+  await initializeDatabase()
+
   const app = createApp(App)
   app.use(createPinia())
 
@@ -18,7 +20,7 @@ function mountApp() {
       document.body.appendChild(rootDiv)
     }
     app.mount('#st-custom-ui-root')
-    
+
     // Automatically enter the UI since the mount was triggered by the Layer 0 button
     useAppStore().enterUI()
   } else {
