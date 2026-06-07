@@ -33,9 +33,7 @@ interface StBridgedData {
   characters?: StBridgedChar[];
   characterId?: string | number;
   worldInfo?: any;
-  worldInfoString?: string | null;
   settings?: any;
-  settingsString?: string | null;
   chat?: StBridgedChatMsg[];
 }
 
@@ -57,8 +55,8 @@ export function listenForStBridge() {
     const bd = bridgeData;
     console.log('[st-integration] Received ST bridge data via postMessage:', {
       charCount: bd.characters?.length || 0,
-      hasWorldInfo: !!bd.worldInfo || !!bd.worldInfoString,
-      hasSettings: !!bd.settings || !!bd.settingsString,
+      hasWorldInfo: !!bd.worldInfo,
+      hasSettings: !!bd.settings,
       chatCount: bd.chat?.length || 0,
     });
   });
@@ -130,8 +128,6 @@ export function readStPreset(): { preset: Omit<ChatPreset, 'id' | 'createdAt' | 
   if (bridgeData) {
     if (bridgeData.settings) {
       stSettings = bridgeData.settings;
-    } else if (bridgeData.settingsString) {
-      try { stSettings = JSON.parse(bridgeData.settingsString); } catch { /* ignore */ }
     }
     const char = getChar();
     if (char) {
@@ -221,15 +217,6 @@ export function readStWorldInfo(): Array<Omit<Lorebook, 'id' | 'createdAt' | 'up
         const raw = bridgeData.worldInfo;
         const imported = importLorebook({ name: 'ST 世界书', entries: raw.entries || raw });
         books.push(imported);
-      } catch { /* ignore */ }
-    }
-    if (bridgeData.worldInfoString) {
-      try {
-        const wi = JSON.parse(bridgeData.worldInfoString);
-        if (wi?.entries) {
-          const imported = importLorebook({ name: 'ST 世界书', entries: wi.entries });
-          books.push(imported);
-        }
       } catch { /* ignore */ }
     }
     return books;

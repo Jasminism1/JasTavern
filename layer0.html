@@ -381,31 +381,28 @@
     }
 
     // ==============================================
-    // 从顶层窗口读取 ST 完整上下文（供 postMessage 传输）
+    // 从顶层窗口读取 ST 完整上下文（全面扫描所有数据源）
     // ==============================================
     function readStContext(topWindow) {
         try {
-            const st = topWindow.SillyTavern;
-            if (!st) return null;
+            var st = topWindow.SillyTavern;
+            if (!st) { console.log('[入口前端] window.SillyTavern 不存在'); return null; }
 
-            const ctx = st.getContext();
-            if (!ctx) return null;
+            var ctx = st.getContext();
+            if (!ctx) { console.log('[入口前端] getContext() 返回空'); return null; }
 
-            const result = {
-                // 角色信息
+            var result = {
                 characters: [],
                 characterId: ctx.characterId,
-                // 世界书
                 worldInfo: null,
-                worldInfoString: null,
-                // 全局设置
                 settings: null,
-                settingsString: null,
-                // 当前对话
                 chat: null,
+                // Debug: what was found
+                _sources: { settings: '', worldInfo: '' }
             };
+            var ls = topWindow.localStorage;
 
-            // 角色
+            // ---- 角色 ----
             if (Array.isArray(ctx.characters)) {
                 result.characters = ctx.characters.map(function(c) {
                     return {
@@ -419,39 +416,119 @@
                 });
             }
 
-            // 世界书
-            try {
-                if (ctx.worldInfo && typeof ctx.worldInfo === 'object') {
+            // ---- 世界书：多条路径尝试 ----
+            // 1. ctx.worldInfo (live object)
+            if (ctx.worldInfo && typeof ctx.worldInfo === 'object') {
+                try {
                     result.worldInfo = JSON.parse(JSON.stringify(ctx.worldInfo));
+                    result._sources.worldInfo = 'ctx.worldInfo';
+                } catch(e) {}
+            }
+            // 2. 扫描所有 localStorage key
+            if (!result.worldInfo) {
+                var wiKeys = ['worldinfo', 'WorldInfo', 'world_info', 'WI_', 'worldinfo_'];
+                for (var ki = 0; ki < ls.length && !result.worldInfo; ki++) {
+                    var key = ls.key(ki);
+                    if (!key) continue;
+                    var lk = key.toLowerCase();
+                    if (lk.indexOf('worldinfo') >= 0 || lk.indexOf('world_info') >= 0 || lk.indexOf('_wi') >= 0) {
+                        try {
+                            var raw = ls.getItem(key);
+                            if (raw && raw.length > 10 && (raw[0] === '{' || raw[0] === '[')) {
+                                var parsed = JSON.parse(raw);
+                                if (parsed && (parsed.entries || (typeof parsed === 'object' && Object.keys(parsed).length > 0))) {
+                                    result.worldInfo = parsed;
+                                    result._sources.worldInfo = 'ls:' + key;
+                                    break;
+                                }
+                            }
+                        } catch(e) {}
+                    }
                 }
-            } catch(e) { /* ignore */ }
-            try {
-                result.worldInfoString = topWindow.localStorage.getItem('SillyTavern_worldinfo');
-            } catch(e) { /* ignore */ }
-
-            // ST 全局设置
-            try {
-                result.settingsString = topWindow.localStorage.getItem('SillyTavern_settings');
-                if (result.settingsString) {
-                    result.settings = JSON.parse(result.settingsString);
+            }
+            // 3. 从角色对象中读取内嵌 worldinfo
+            if (!result.worldInfo && ctx.characters && ctx.characters.length > 0) {
+                var activeIdx = typeof ctx.characterId === 'number' ? ctx.characterId : 0;
+                var activeChar = ctx.characters[activeIdx] || ctx.characters[0];
+                if (activeChar && activeChar.data && activeChar.data.worldinfo) {
+                    try {
+                        result.worldInfo = JSON.parse(JSON.stringify(activeChar.data.worldinfo));
+                        result._sources.worldInfo = 'char.data.worldinfo';
+                    } catch(e) {}
                 }
-            } catch(e) { /* ignore */ }
+            }
 
-            // 对话历史（最近 50 条，供初始导入）
+            // ---- ST 全局设置：多条路径 ----
+            // 1. 扫描 localStorage 中所有可能的设置 key
+            var settingsKeys = [
+                'SillyTavern_settings', 'settings', 'STSettings',
+                'st_settings', 'tavern_settings', 'TavernAI_settings',
+                'SillyTavern', 'ST_main', 'extensions_settings',
+                'power_user', 'powerUser',
+            ];
+            for (var si = 0; si < settingsKeys.length && !result.settings; si++) {
+                try {
+                    var sRaw = ls.getItem(settingsKeys[si]);
+                    if (sRaw && sRaw.length > 10) {
+                        var sParsed = JSON.parse(sRaw);
+                        if (sParsed && typeof sParsed === 'object') {
+                            result.settings = sParsed;
+                            result._sources.settings = 'ls:' + settingsKeys[si];
+                            break;
+                        }
+                    }
+                } catch(e) {}
+            }
+            // 2. 扫描所有含 'setting' 或 'tavern' 或 'ST' 前缀的 key
+            if (!result.settings) {
+                for (var sj = 0; sj < ls.length && !result.settings; sj++) {
+                    var skey = ls.key(sj);
+                    if (!skey) continue;
+                    var slk = skey.toLowerCase();
+                    if (slk.indexOf('setting') >= 0 || slk.indexOf('tavern') >= 0 || (skey.indexOf('ST') === 0 && skey.length > 3)) {
+                        try {
+                            var sRaw2 = ls.getItem(skey);
+                            if (sRaw2 && sRaw2.length > 10 && sRaw2[0] === '{') {
+                                var sParsed2 = JSON.parse(sRaw2);
+                                if (sParsed2 && typeof sParsed2 === 'object' && (sParsed2.main || sParsed2.prompt_order || sParsed2.temperature || sParsed2.temp_openai)) {
+                                    result.settings = sParsed2;
+                                    result._sources.settings = 'ls-scan:' + skey;
+                                    break;
+                                }
+                            }
+                        } catch(e) {}
+                    }
+                }
+            }
+            // 3. 从 ctx 直接读取
+            if (!result.settings && ctx.settings) {
+                result.settings = JSON.parse(JSON.stringify(ctx.settings));
+                result._sources.settings = 'ctx.settings';
+            }
+
+            // ---- 对话历史 ----
             try {
                 if (Array.isArray(ctx.chat)) {
                     result.chat = ctx.chat.slice(-50).map(function(m) {
-                        return {
-                            is_user: !!m.is_user,
-                            mes: String(m.mes || ''),
-                            send_date: m.send_date || 0,
-                        };
+                        return { is_user: !!m.is_user, mes: String(m.mes || ''), send_date: m.send_date || 0 };
                     });
                 }
-            } catch(e) { /* ignore */ }
+            } catch(e) {}
+
+            console.log('[入口前端] ST 扫描结果:', {
+                charCount: result.characters.length,
+                hasWorldInfo: !!result.worldInfo,
+                worldInfoSource: result._sources.worldInfo,
+                hasSettings: !!result.settings,
+                settingsSource: result._sources.settings,
+                chatCount: result.chat ? result.chat.length : 0,
+                // List all localStorage keys for debugging
+                allLSKeys: (function() { var keys=[]; for(var i=0;i<ls.length;i++) keys.push(ls.key(i)); return keys; })()
+            });
 
             return result;
         } catch(e) {
+            console.error('[入口前端] readStContext 异常:', e);
             return null;
         }
     }
