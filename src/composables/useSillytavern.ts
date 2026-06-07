@@ -8,6 +8,7 @@ import {
   type Lorebook, type ChatPreset, type AppSettings, type ChatSession, type ChatMessage,
 } from '../sillytavern';
 import { useConversationTreeStore } from '../stores/conversationTree';
+import { isInSillyTavern, detectStConnection, syncFromSt } from '../sillytavern/st-integration';
 
 export function useSillytavern() {
   const lorebooks = ref<Lorebook[]>([]);
@@ -34,6 +35,34 @@ export function useSillytavern() {
     settings.value = s || null;
     activeLorebookIds.value = s?.activeLorebookIds || [];
     chats.value = c;
+
+    // Sync preset + lorebook from ST host environment (one-shot import if empty)
+    if (isInSillyTavern()) {
+      try {
+        const syncResult = await syncFromSt({
+          getSettings,
+          saveSettings,
+          getPresets,
+          savePreset,
+          getLorebooks,
+          saveLorebook,
+        });
+        if (syncResult.connected) {
+          console.log('[useSillytavern] ST sync result:', syncResult);
+          // Reload after sync
+          if (syncResult.importedPreset || syncResult.importedLorebooks > 0 || syncResult.characterName) {
+            const [l2, p2, s2] = await Promise.all([getLorebooks(), getPresets(), getSettings()]);
+            lorebooks.value = l2;
+            presets.value = p2;
+            settings.value = s2 || null;
+            activeLorebookIds.value = s2?.activeLorebookIds || [];
+          }
+        }
+      } catch (err) {
+        console.warn('[useSillytavern] ST sync failed (non-fatal):', err);
+      }
+    }
+
     isLoading.value = false;
   };
 
@@ -157,16 +186,34 @@ export function useSillytavern() {
       if (activePreset.settings.pres_pen_openai !== undefined) requestBody.presence_penalty = activePreset.settings.pres_pen_openai;
       if (activePreset.settings.stream_openai !== undefined) requestBody.stream = activePreset.settings.stream_openai;
 
-      // 6. Call API (or use mock fallback in standalone dev mode)
-      let rawReply: string;
-      const hasApiKey = s.api.apiKey && s.api.apiKey.trim().length > 0;
+      // 6. Resolve API credentials
+      let apiBaseUrl: string;
+      let apiKey: string;
 
-      if (hasApiKey) {
+      if (s.apiSource === 'st-builtin') {
+        const stConn = detectStConnection();
+        if (stConn) {
+          apiBaseUrl = stConn.baseUrl;
+          apiKey = stConn.apiKey;
+        } else {
+          // Fallback to custom settings if ST connection not detected
+          apiBaseUrl = s.api.baseUrl;
+          apiKey = s.api.apiKey;
+        }
+      } else {
+        apiBaseUrl = s.api.baseUrl;
+        apiKey = s.api.apiKey;
+      }
+
+      // 7. Call API
+      let rawReply: string;
+
+      if (apiKey && apiBaseUrl) {
         try {
-          const response = await fetch(s.api.baseUrl + '/chat/completions', {
+          const response = await fetch(apiBaseUrl + '/chat/completions', {
             method: 'POST',
             headers: {
-              'Authorization': `Bearer ${s.api.apiKey}`,
+              'Authorization': `Bearer ${apiKey}`,
               'Content-Type': 'application/json',
             },
             body: JSON.stringify(requestBody),
@@ -181,18 +228,7 @@ export function useSillytavern() {
           throw err;
         }
       } else {
-        // Standalone dev mode — mock LLM response for UI testing
-        console.warn('[useSillytavern] No API key configured — using mock response in standalone mode.');
-        await new Promise(r => setTimeout(r, 600));
-        rawReply = `（Mock 回复）已收到你的消息：「${content}」
-
-你可以在设置中配置 API Key 以接入真实的 LLM 服务。
-
-当前对话已使用以下 Prompt 模板：
-- 角色：${s.characterName}
-- 预设：${activePreset.name}
-- 匹配的世界书条目：${activeBooks.length} 个
-- 历史消息数：${treeMessages.length} 条`;
+        throw new Error('未配置 API Key。请在设置 → API 中配置。');
       }
       const { cleanedText: reply, updates: extractedVars } = extractVariables(rawReply);
       const nextVariables = mergeVariables(currentVariables, extractedVars);

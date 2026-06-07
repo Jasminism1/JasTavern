@@ -154,6 +154,8 @@ export interface AppSettings {
   api: ApiSettings;
   /** 'single' = primary API handles all tasks. 'dual' = primary handles story, secondary handles variables. */
   apiMode: 'single' | 'dual';
+  /** 'st-builtin' = use ST host connection; 'custom' = use user-configured API */
+  apiSource: ApiSource;
   activePresetId: string | null;
   activeLorebookIds: string[];
   userName: string;
@@ -188,6 +190,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     timeout: 60000,
   },
   apiMode: 'single',
+  apiSource: 'custom',
   activePresetId: null,
   activeLorebookIds: [],
   userName: '用户',
@@ -306,3 +309,10 @@ export interface VarsPatch {
 
 export type Task = 'story' | 'summary' | 'vars';
 export type ApiTarget = 'primary' | 'secondary';
+export type ApiSource = 'st-builtin' | 'custom';
+
+export interface StConnectionProfile {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+}

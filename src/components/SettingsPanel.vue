@@ -36,6 +36,9 @@
 
       <!-- 其他设置 -->
       <OtherPanel v-if="activeTab === 'other'" />
+
+      <!-- API 设置 -->
+      <ApiPanel v-if="activeTab === 'api'" />
     </div>
   </div>
   <!-- 保存按钮（调整布局结构，仅改外层容器类名） -->
@@ -53,6 +56,7 @@ import StoryPanel from './SettingsPanelComponents/StoryPanel.vue'
 import BackgroundPanel from './SettingsPanelComponents/BackgroundPanel.vue'
 import RecallingPanel from './SettingsPanelComponents/RecallingPanel.vue'
 import OtherPanel from './SettingsPanelComponents/OtherPanel.vue'
+import ApiPanel from './SettingsPanelComponents/ApiPanel.vue'
 
 // 使用设置状态管理（如果需要全局共享设置状态）
 const settingsStore = useSettingsStore()
@@ -64,6 +68,7 @@ const tabs = ref([
   { key: 'background', name: '背景' },
   { key: 'interface', name: '界面' },
   { key: 'recall', name: '回想' },
+  { key: 'api', name: 'API' },
   { key: 'other', name: '其他' }
 ])
 // 默认激活的标签（界面）
