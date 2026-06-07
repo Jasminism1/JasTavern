@@ -6,12 +6,16 @@
  * All data is imported into our local IndexedDB and managed independently.
  */
 
-import type { Lorebook, ChatPreset, AppSettings, StConnectionProfile } from './types';
-import { importLorebook, importPreset } from './importer';
+import type { Lorebook, ChatPreset, AppSettings } from './types';
+import { importLorebook } from './importer';
 import { isInSillyTavern } from '../env';
 
-// Re-export for convenience
 export { isInSillyTavern };
+
+/** Deep clone via JSON to strip non-structurally-cloneable values before IndexedDB write. */
+function sanitize<T>(data: T): T {
+  return JSON.parse(JSON.stringify(data));
+}
 
 // ---- Type for ST character object (partial — what we need) ----
 
@@ -51,73 +55,6 @@ export function readStCharacter(): { name: string; description: string; personal
       personality: char.personality || '',
       scenario: char.scenario || '',
     };
-  } catch {
-    return null;
-  }
-}
-
-// ---- 2. Detect ST's API connection profile ----
-
-/**
- * Try to read ST's active API connection profile.
- * ST stores connection profiles in its settings / localStorage.
- */
-export function detectStConnection(): StConnectionProfile | null {
-  try {
-    // ST stores API settings in the global context or localStorage
-    const st = (window as any).SillyTavern;
-    if (!st) return null;
-
-    // Try to read from ST's settings object
-    const ctx = st.getContext() as any;
-
-    // Attempt 1: direct context properties (varies by ST version)
-    if (ctx.apiUrl) {
-      return {
-        baseUrl: ctx.apiUrl.replace(/\/+$/, ''),
-        apiKey: ctx.apiKey || '',
-        model: ctx.model || 'gpt-3.5-turbo',
-      };
-    }
-
-    // Attempt 2: read from ST's localStorage profiles
-    const settingsRaw = localStorage.getItem('SillyTavern_settings');
-    if (settingsRaw) {
-      const settings = JSON.parse(settingsRaw);
-      const api = settings?.api || settings?.openai || settings?.connection || {};
-
-      // Check OpenAI-compatible provider
-      const baseUrl = api.base_url || api.url || api.baseUrl || '';
-      const apiKey = api.api_key || api.key || api.apiKey || '';
-
-      if (baseUrl && apiKey) {
-        return {
-          baseUrl: baseUrl.replace(/\/+$/, ''),
-          apiKey,
-          model: api.model || api.chat_model || 'gpt-3.5-turbo',
-        };
-      }
-    }
-
-    // Attempt 3: try ST's per-profile settings
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (!key) continue;
-      if (key.includes('api') && key.includes('SillyTavern')) {
-        try {
-          const val = JSON.parse(localStorage.getItem(key) || '');
-          if (val?.api_key && val?.base_url) {
-            return {
-              baseUrl: val.base_url.replace(/\/+$/, ''),
-              apiKey: val.api_key,
-              model: val.model || 'gpt-3.5-turbo',
-            };
-          }
-        } catch { /* continue */ }
-      }
-    }
-
-    return null;
   } catch {
     return null;
   }
@@ -233,7 +170,6 @@ export interface StSyncResult {
   characterName: string | null;
   importedPreset: boolean;
   importedLorebooks: number;
-  apiProfile: StConnectionProfile | null;
 }
 
 /**
@@ -255,35 +191,19 @@ export async function syncFromSt(
     characterName: null,
     importedPreset: false,
     importedLorebooks: 0,
-    apiProfile: null,
   };
 
   if (!isInSillyTavern()) return result;
 
-  // A. Detect ST API connection
-  result.apiProfile = detectStConnection();
-
-  // B. Update settings with ST character name + API mode
+  // A. Update settings with ST character name
   const settings = await context.getSettings();
   if (settings) {
     const char = readStCharacter();
-    let updated = false;
-
-    if (char?.name) {
-      result.characterName = char.name;
+    if (char?.name && settings.characterName === 'AI') {
       settings.characterName = char.name;
-      updated = true;
+      await context.saveSettings(sanitize(settings));
     }
-
-    // Default to st-builtin when running inside ST
-    if (!settings.apiSource || settings.apiSource === 'custom') {
-      settings.apiSource = 'st-builtin';
-      updated = true;
-    }
-
-    if (updated) {
-      await context.saveSettings(settings);
-    }
+    result.characterName = char?.name || null;
   }
 
   // C. Import preset from ST (only if none exist)
@@ -297,7 +217,7 @@ export async function syncFromSt(
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
-      await context.savePreset(preset);
+      await context.savePreset(sanitize(preset));
       result.importedPreset = true;
     }
   }
@@ -313,7 +233,7 @@ export async function syncFromSt(
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
-      await context.saveLorebook(lb);
+      await context.saveLorebook(sanitize(lb));
       result.importedLorebooks++;
     }
   }

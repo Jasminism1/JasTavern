@@ -2,86 +2,155 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>RPG 游戏入口</title>
+    <title>卡莉的小游戏</title>
     <style>
+        @font-face {
+            font-family: 'Heiti SC';
+            src: url('https://testingcf.jsdelivr.net/gh/PsionicZephyr/Files@main/STHeitiSC-Light.woff2') format('woff2'),
+                 url('https://cdn.jsdelivr.net/gh/PsionicZephyr/Files@main/STHeitiSC-Light.woff2') format('woff2'),
+                 url('https://testingcf.jsdelivr.net/gh/PsionicZephyr/Files@main/STHeitiSC-Light.woff') format('woff'),
+                 url('https://cdn.jsdelivr.net/gh/PsionicZephyr/Files@main/STHeitiSC-Light.woff') format('woff'),
+                 url('https://testingcf.jsdelivr.net/gh/PsionicZephyr/Files@main/STHeitiSC-Light.ttf') format('truetype'),
+                 url('https://cdn.jsdelivr.net/gh/PsionicZephyr/Files@main/STHeitiSC-Light.ttf') format('truetype');
+            font-weight: normal;
+            font-style: normal;
+        }
+
         body, html {
             margin: 0;
             padding: 0;
-            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-            background-color: transparent; /* 酒馆楼层中必须透明 */
+            font-family: 'Heiti SC', 'Courier New', Courier, monospace;
+            background-color: transparent; /* Important for embedding */
             color: #e0e0e0;
         }
 
         .entry-container {
-            padding: 30px;
-            border: 1px solid #445;
-            border-radius: 12px;
-            background: linear-gradient(145deg, #161622, #1a1a2b);
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border: 2px solid #7e00f3;
+            border-radius: 15px;
+            background-color: #1c0036; /* Solid dark background */
+            box-shadow: 0 0 25px rgba(126, 0, 243, 0.6), inset 0 0 15px rgba(126, 0, 243, 0.4);
             position: relative;
             overflow: hidden;
+        }
+
+        .background-container-image {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background-image: url('https://gitgud.io/NamiToTani/ps-storage/-/raw/master/image/kali/1a49f2ba-d10f-4e6c-aac0-2b331debd1d8.png');
+            background-repeat: no-repeat;
+            z-index: 0; /* Below content */
+            opacity: 0.25;
+            transition: background-size 0.3s ease, background-position 0.3s ease;
+            pointer-events: none;
+        }
+
+        .content-wrapper {
+            position: relative;
+            z-index: 1; /* Above background */
             text-align: center;
         }
 
         .content-wrapper h1 {
-            color: #4da6ff;
+            color: #7e00f3;
             margin-top: 0;
-            margin-bottom: 15px;
-            font-size: 1.8em;
-            text-shadow: 0 0 10px rgba(77, 166, 255, 0.3);
+            margin-bottom: 20px;
+            font-size: 2em;
+            text-shadow: 0 0 8px #7e00f3;
         }
-
+        .content-wrapper h1 .fa-dragon {
+            font-size: 0.9em;
+            vertical-align: baseline;
+            margin: 0 12px;
+            opacity: 0.9;
+        }
         .content-wrapper p {
-            line-height: 1.6;
-            margin-bottom: 25px;
-            font-size: 1em;
-            color: #aaa;
+            line-height: 1.8;
+            margin-bottom: 30px;
+            font-size: 1.2em;
+            color: #c0c0c0;
         }
-
         .start-button {
-            padding: 14px 40px;
+            padding: 12px 30px;
             font-size: 18px;
-            font-weight: bold;
+            font-family: 'Heiti SC', 'Courier New', Courier, monospace;
             color: #fff;
-            background: linear-gradient(to bottom, #2d5a88, #1a3a5c);
-            border: 1px solid #4da6ff;
-            border-radius: 6px;
+            background-color: #7e00f3;
+            border: 2px solid #7e00f3;
+            border-radius: 8px;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: all 0.3s ease;
             text-transform: uppercase;
-            letter-spacing: 1px;
-            box-shadow: 0 0 12px rgba(77, 166, 255, 0.4);
+            letter-spacing: 2px;
+            box-shadow: 0 0 10px rgba(126, 0, 243, 0.8);
         }
-
         .start-button:hover {
-            background: linear-gradient(to bottom, #3b74b1, #234c7a);
-            box-shadow: 0 0 20px rgba(77, 166, 255, 0.7);
-            transform: translateY(-1px);
+            background-color: transparent;
+            color: #7e00f3;
+            box-shadow: 0 0 20px #7e00f3, 0 0 30px #7e00f3;
         }
-
-        .start-button:active {
-            transform: translateY(1px);
+        .secondary-button {
+            padding: 8px 20px;
+            font-size: 14px;
+            background-color: #7e00f3;
+            border-color: #7e00f3;
+            margin-top: 10px;
         }
-
+        .secondary-button:hover {
+            color: #9d4bff;
+            border-color: #9d4bff;
+            box-shadow: 0 0 15px #9d4bff, 0 0 25px #9d4bff;
+        }
+        .start-button .fa-laptop-code {
+            margin-right: 10px;
+        }
         #status-summary {
-            margin-top: 15px;
-            font-size: 13px;
-            color: #667;
+            margin-top: 20px;
+            font-size: 14px;
+            color: #888;
+            font-style: italic;
+        }
+        .footer-notes {
+            margin-top: 30px;
+            font-size: 12px;
+            color: #666;
+            line-height: 1.6;
+        }
+        .footer-notes a {
+            color: #888;
+            text-decoration: none;
+            transition: color 0.2;
+        }
+        .footer-notes a:hover {
+            color: #7e00f3;
         }
     </style>
+    <!-- 使用国内CDN替代无法访问的Font Awesome -->
+    <link rel="stylesheet" href="https://lf6-cdn-tos.bytecdntp.com/cdn/expire-1-M/font-awesome/6.5.1/css/all.min.css">
 </head>
 <body>
 
 <div class="entry-container">
+    <div class="background-container-image"></div>
     <div class="content-wrapper">
-        <h1>🗡️ 踏上新的旅途</h1>
-        <p>你即将进入一个全屏交互式的冒险世界。<br>（请确保你已在酒馆助手中启用了 UI 注入脚本）</p>
-        
+        <h1><i class="fa-solid fa-dragon"></i> Kali Linux <i class="fa-solid fa-dragon"></i></h1>
+        <p>呐呐，准备好和卡莉一起，把这个世界玩个遍了吗？<br>点击下面的按钮，就可以开始同层游玩啦~<br>如果不想玩同层，请向右切换，选择你的开局~</p>
         <button id="start-game-btn" class="start-button">
-            ▶ 进入游戏 UI
+            <i class="fa-solid fa-laptop-code"></i>连接到卡莉...
         </button>
-        
-        <div id="status-summary">等待进入...</div>
+        <div id="status-summary">等待连接...</div>
+
+        <div class="fix-issue-section" style="margin-top: 25px; border-top: 1px solid #4a2c6d; padding-top: 20px;">
+             <p style="font-size: 0.9em; color: #fff; line-height: 1.5; margin: 0 auto 15px auto; max-width: 80%;">请不要直接开始同层游玩哦，为了防止酒馆抽风重置第0层，让你丢掉存档，请点击下面的按钮，创建至少一个新楼再开始游玩！</p>
+             <button id="add-floor-btn" class="start-button secondary-button">新建空楼层</button>
+        </div>
+
+        <div class="footer-notes">
+            老师傅香炒铜锣烧，依旧追求着最甜的味道<br>
+            波峰与波谷<br><br>
+            © 2025 PsionicZephyr. All rights reserved.<br>
+            <a href="https://discord.gg/9vXvVDuphU" target="_blank" rel="noopener noreferrer">https://discord.gg/9vXvVDuphU</a>
+        </div>
     </div>
 </div>
 
@@ -89,24 +158,208 @@
 (function() {
     'use strict';
 
-    // 检查 SillyTavern 事件系统是否可用
-    if (typeof eventEmit === 'undefined') {
-        console.error('[第0层入口] SillyTavern 事件系统未找到。如果你不在酒馆内，此按钮无效。');
-        const status = document.getElementById('status-summary');
-        if (status) status.innerHTML = '<span style="color:#ff6b6b;">错误：未检测到酒馆环境。</span>';
+    // --- Background Adjustment Logic ---
+    const IMAGE_ASPECT_RATIO = 832 / 1216;
+
+    function adjustBackground() {
+        const container = document.querySelector('.entry-container');
+        const backgroundImage = document.querySelector('.background-container-image');
+        if (!container || !backgroundImage) return;
+
+        const containerHeight = container.offsetHeight;
+        const containerWidth = container.offsetWidth;
+
+        if (containerWidth === 0) return;
+
+        const imageHeightAtFullWidth = containerWidth * IMAGE_ASPECT_RATIO;
+
+        if (containerHeight > imageHeightAtFullWidth) {
+            backgroundImage.style.backgroundSize = 'cover';
+            backgroundImage.style.backgroundPosition = 'center center';
+        } else {
+            backgroundImage.style.backgroundSize = '100% auto';
+            backgroundImage.style.backgroundPosition = 'top center';
+        }
+    }
+
+    // Use ResizeObserver for better performance and accuracy
+    const container = document.querySelector('.entry-container');
+    if (container) {
+        const observer = new ResizeObserver(() => {
+            adjustBackground();
+        });
+        observer.observe(container);
+    }
+    
+    // Initial call
+    adjustBackground();
+
+
+    // --- SillyTavern API Integration ---
+    if (typeof eventOn === 'undefined' || typeof eventEmit === 'undefined') {
+        console.error('SillyTavern event system not found.');
+        if(container) container.innerHTML = '<p style="color:red;">错误：SillyTavern API 未找到。</p>';
         return;
     }
 
     const startButton = document.getElementById('start-game-btn');
     const statusSummary = document.getElementById('status-summary');
 
+    // 核心修改：从iframe内部跳出，直接挂载到顶层窗口
     startButton.addEventListener('click', () => {
-        console.log('[第0层入口] 正在请求接管主 UI...');
-        statusSummary.textContent = '正在注入并启动 UI...';
-        
-        // 触发通过 JS-Slash-Runner 监听的自定义事件
-        eventEmit('st_ui:show_main_ui');
+        console.log('[入口前端] 正在打开酒馆全局全屏UI...');
+        statusSummary.textContent = '正在加载UI...';
+
+        openGlobalTavernFullscreen('https://jas-tavern-001.vercel.app/');
+        statusSummary.textContent = 'UI已成功打开';
     });
+
+    const addFloorButton = document.getElementById('add-floor-btn');
+    if (addFloorButton) {
+        addFloorButton.addEventListener('click', () => {
+            if (typeof createChatMessages === 'function') {
+                console.log('[入口前端] 新建空楼层...');
+                statusSummary.textContent = '正在创建空楼层...';
+                createChatMessages([{ role: 'user', message: '<char>' }])
+                    .then(() => {
+                        console.log('[入口前端] 空楼层已创建。');
+                        if (statusSummary) {
+                            statusSummary.textContent = '空楼层已成功创建。';
+                        }
+                    })
+                    .catch(err => {
+                        console.error('[入口前端] 创建空楼层失败:', err);
+                        if (statusSummary) {
+                            statusSummary.textContent = '创建空楼层失败。';
+                        }
+                    });
+            } else {
+                console.error('[入口前端] createChatMessages function not found.');
+                if (statusSummary) {
+                    statusSummary.textContent = '错误: SillyTavern API (createChatMessages) 未找到。';
+                }
+            }
+        });
+    }
+
+    eventOn('my_game:update_status', (summary) => {
+        console.log('[入口前端] 收到状态更新:', summary);
+        if (statusSummary) {
+            statusSummary.textContent = summary;
+        }
+    });
+
+    // ==============================================
+    // 酒馆全局全屏核心函数（从iframe跳出到顶层窗口）
+    // ==============================================
+    function openGlobalTavernFullscreen(url) {
+        // 获取顶层窗口（整个酒馆页面）
+        const topWindow = window.top;
+        const topDocument = topWindow.document;
+
+        // 检查是否已经打开了全屏UI
+        if (topDocument.getElementById('global-tavern-fullscreen-container')) {
+            console.warn('[入口前端] 全局全屏UI已经打开');
+            return;
+        }
+
+        // 在顶层窗口创建全屏容器
+        const fullscreenContainer = topDocument.createElement('div');
+        fullscreenContainer.id = 'global-tavern-fullscreen-container';
+        fullscreenContainer.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 999999; /* 覆盖酒馆所有元素 */
+            background-color: #000;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        `;
+
+        // 创建iframe加载你的Vercel UI
+        const iframe = topDocument.createElement('iframe');
+        iframe.src = url;
+        iframe.style.cssText = `
+            width: 100%;
+            height: 100%;
+            border: none;
+            margin: 0;
+            padding: 0;
+            display: block;
+        `;
+        iframe.allowFullscreen = true;
+        iframe.sandbox = 'allow-same-origin allow-scripts allow-popups allow-forms allow-modals';
+
+        // 创建关闭按钮（右上角）
+        const closeButton = topDocument.createElement('button');
+        closeButton.textContent = '×';
+        closeButton.title = '按ESC键也可关闭';
+        closeButton.style.cssText = `
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            font-size: 36px;
+            font-weight: bold;
+            color: #fff;
+            background: rgba(0, 0, 0, 0.5);
+            border: none;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            line-height: 40px;
+            text-align: center;
+            cursor: pointer;
+            z-index: 1000000;
+            transition: all 0.2s ease;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        `;
+
+        // 关闭按钮悬停效果
+        closeButton.addEventListener('mouseenter', () => {
+            closeButton.style.background = 'rgba(126, 0, 243, 0.8)';
+            closeButton.style.transform = 'scale(1.1)';
+        });
+        closeButton.addEventListener('mouseleave', () => {
+            closeButton.style.background = 'rgba(0, 0, 0, 0.5)';
+            closeButton.style.transform = 'scale(1)';
+        });
+
+        // 关闭函数
+        function closeFullscreen() {
+            if (topDocument.body.contains(fullscreenContainer)) {
+                topDocument.body.removeChild(fullscreenContainer);
+                topWindow.removeEventListener('keydown', escKeyHandler);
+                statusSummary.textContent = 'UI已关闭';
+                console.log('[入口前端] 全局全屏UI已关闭');
+            }
+        }
+
+        // ESC键关闭功能（绑定在顶层窗口）
+        function escKeyHandler(e) {
+            if (e.key === 'Escape') {
+                closeFullscreen();
+            }
+        }
+
+        // 绑定关闭事件
+        closeButton.addEventListener('click', closeFullscreen);
+        topWindow.addEventListener('keydown', escKeyHandler);
+
+        // 组装DOM并挂载到顶层窗口的body上
+        fullscreenContainer.appendChild(iframe);
+        fullscreenContainer.appendChild(closeButton);
+        topDocument.body.appendChild(fullscreenContainer);
+
+        console.log('[入口前端] 酒馆全局全屏UI已成功挂载到顶层窗口');
+    }
+
+    console.log('[入口前端] 初始化完成，已准备好发送和接收事件。');
 
 })();
 </script>

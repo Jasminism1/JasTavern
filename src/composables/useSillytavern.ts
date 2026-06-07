@@ -8,7 +8,7 @@ import {
   type Lorebook, type ChatPreset, type AppSettings, type ChatSession, type ChatMessage,
 } from '../sillytavern';
 import { useConversationTreeStore } from '../stores/conversationTree';
-import { isInSillyTavern, detectStConnection, syncFromSt } from '../sillytavern/st-integration';
+import { isInSillyTavern, syncFromSt } from '../sillytavern/st-integration';
 
 export function useSillytavern() {
   const lorebooks = ref<Lorebook[]>([]);
@@ -82,7 +82,8 @@ export function useSillytavern() {
 
   const updateSettings = async (updates: Partial<AppSettings>) => {
     if (!settings.value) return;
-    const newSettings = { ...settings.value, ...updates };
+    // JSON round-trip sanitizes non-structurally-cloneable objects before IndexedDB write
+    const newSettings = JSON.parse(JSON.stringify({ ...settings.value, ...updates }));
     await saveSettings(newSettings);
     settings.value = newSettings;
   };
@@ -186,24 +187,10 @@ export function useSillytavern() {
       if (activePreset.settings.pres_pen_openai !== undefined) requestBody.presence_penalty = activePreset.settings.pres_pen_openai;
       if (activePreset.settings.stream_openai !== undefined) requestBody.stream = activePreset.settings.stream_openai;
 
-      // 6. Resolve API credentials
-      let apiBaseUrl: string;
-      let apiKey: string;
-
-      if (s.apiSource === 'st-builtin') {
-        const stConn = detectStConnection();
-        if (stConn) {
-          apiBaseUrl = stConn.baseUrl;
-          apiKey = stConn.apiKey;
-        } else {
-          // Fallback to custom settings if ST connection not detected
-          apiBaseUrl = s.api.baseUrl;
-          apiKey = s.api.apiKey;
-        }
-      } else {
-        apiBaseUrl = s.api.baseUrl;
-        apiKey = s.api.apiKey;
-      }
+      // 6. Always use user-configured API key
+      // (ST never exposes real API keys to frontend JS)
+      const apiBaseUrl = s.api.baseUrl;
+      const apiKey = s.api.apiKey;
 
       // 7. Call API
       let rawReply: string;
