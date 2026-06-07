@@ -64,6 +64,7 @@
 import { ref, onMounted } from 'vue';
 import { isInSillyTavern } from '../../sillytavern/st-integration';
 import { saveApiConfig, loadApiConfig, type ApiConfig } from '../../stores/apiStorage';
+import { logRequest, logResponse, logError } from '../../stores/requestLogger';
 
 const stConnected = ref(isInSillyTavern());
 
@@ -117,78 +118,73 @@ function getFetchUrl(path: string): string {
 async function testConnection() {
   testing.value = true;
   statusText.value = '正在测试连接...';
+  const url = getFetchUrl('/models');
   try {
-    const url = getFetchUrl('/models');
     const res = await fetch(url, {
       method: 'GET',
-      headers: {
-        Authorization: `Bearer ${localApi.value.apiKey}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { Authorization: `Bearer ${localApi.value.apiKey}`, 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(localApi.value.timeout),
     });
+    logRequest('GET ' + url, {});
     if (res.ok) {
-      statusText.value = '连接成功 ✅';
+      const data = await res.json().catch(() => ({}));
+      logResponse(res.status, data);
+      statusText.value = '连接成功';
     } else {
+      const errBody = await res.text().catch(() => '');
+      logError(`HTTP ${res.status}: ${errBody}`);
       statusText.value = `服务器返回错误 ${res.status}`;
     }
   } catch (err) {
+    logError(String(err));
     statusText.value = '连接失败: ' + String(err);
-  } finally {
-    testing.value = false;
-  }
+  } finally { testing.value = false; }
 }
 
 async function fetchModels() {
   fetchingModels.value = true;
   statusText.value = '正在获取模型列表...';
+  const url = getFetchUrl('/models');
   try {
-    const url = getFetchUrl('/models');
     const res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${localApi.value.apiKey}`,
-      },
+      headers: { Authorization: `Bearer ${localApi.value.apiKey}` },
       signal: AbortSignal.timeout(localApi.value.timeout),
     });
     const data = await res.json();
+    logRequest('GET ' + url, {});
+    logResponse(res.status, data);
     availableModels.value = data.data ?? [];
     statusText.value = `获取到 ${availableModels.value.length} 个模型`;
   } catch (err) {
+    logError('拉取模型失败: ' + String(err));
     statusText.value = '获取失败: ' + String(err);
-  } finally {
-    fetchingModels.value = false;
-  }
+  } finally { fetchingModels.value = false; }
 }
 
 async function sendTestMessage() {
   sendingTest.value = true;
   statusText.value = '正在发送测试消息...';
+  const url = getFetchUrl('/chat/completions');
+  const body = { model: localApi.value.model, messages: [{ role: 'user', content: 'Hello!' }], max_tokens: 5 };
   try {
-    const url = getFetchUrl('/chat/completions');
     const res = await fetch(url, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${localApi.value.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: localApi.value.model,
-        messages: [{ role: 'user', content: 'Hello!' }],
-        max_tokens: 5,
-      }),
+      headers: { Authorization: `Bearer ${localApi.value.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(localApi.value.timeout),
     });
     const data = await res.json();
+    logRequest(url, body);
+    logResponse(res.status, data);
     if (data.choices?.[0]) {
       statusText.value = '测试成功：' + data.choices[0].message?.content;
     } else {
       statusText.value = '响应异常：' + JSON.stringify(data).slice(0, 100);
     }
   } catch (err) {
+    logError('测试消息发送失败: ' + String(err));
     statusText.value = '发送失败: ' + String(err);
-  } finally {
-    sendingTest.value = false;
-  }
+  } finally { sendingTest.value = false; }
 }
 </script>
 

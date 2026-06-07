@@ -351,12 +351,109 @@
         closeButton.addEventListener('click', closeFullscreen);
         topWindow.addEventListener('keydown', escKeyHandler);
 
+        // ==============================================
+        // ST 数据桥：读取顶层窗口的 SillyTavern 数据，
+        // 通过 postMessage 传入跨域 iframe
+        // ==============================================
+        iframe.addEventListener('load', () => {
+            try {
+                const stData = readStContext(topWindow);
+                if (stData) {
+                    iframe.contentWindow.postMessage(
+                        { type: 'st-context', data: stData },
+                        '*' // cross-origin — receiver validates
+                    );
+                    console.log('[入口前端] ST 上下文已发送到 UI iframe');
+                } else {
+                    console.warn('[入口前端] 未检测到 ST 上下文，将使用独立模式');
+                }
+            } catch (err) {
+                console.warn('[入口前端] ST 上下文读取失败:', err);
+            }
+        });
+
         // 组装DOM并挂载到顶层窗口的body上
         fullscreenContainer.appendChild(iframe);
         fullscreenContainer.appendChild(closeButton);
         topDocument.body.appendChild(fullscreenContainer);
 
         console.log('[入口前端] 酒馆全局全屏UI已成功挂载到顶层窗口');
+    }
+
+    // ==============================================
+    // 从顶层窗口读取 ST 完整上下文（供 postMessage 传输）
+    // ==============================================
+    function readStContext(topWindow) {
+        try {
+            const st = topWindow.SillyTavern;
+            if (!st) return null;
+
+            const ctx = st.getContext();
+            if (!ctx) return null;
+
+            const result = {
+                // 角色信息
+                characters: [],
+                characterId: ctx.characterId,
+                // 世界书
+                worldInfo: null,
+                worldInfoString: null,
+                // 全局设置
+                settings: null,
+                settingsString: null,
+                // 当前对话
+                chat: null,
+            };
+
+            // 角色
+            if (Array.isArray(ctx.characters)) {
+                result.characters = ctx.characters.map(function(c) {
+                    return {
+                        name: c.name,
+                        description: c.description || '',
+                        personality: c.personality || '',
+                        scenario: c.scenario || '',
+                        first_mes: c.first_mes || '',
+                        mes_example: c.mes_example || '',
+                    };
+                });
+            }
+
+            // 世界书
+            try {
+                if (ctx.worldInfo && typeof ctx.worldInfo === 'object') {
+                    result.worldInfo = JSON.parse(JSON.stringify(ctx.worldInfo));
+                }
+            } catch(e) { /* ignore */ }
+            try {
+                result.worldInfoString = topWindow.localStorage.getItem('SillyTavern_worldinfo');
+            } catch(e) { /* ignore */ }
+
+            // ST 全局设置
+            try {
+                result.settingsString = topWindow.localStorage.getItem('SillyTavern_settings');
+                if (result.settingsString) {
+                    result.settings = JSON.parse(result.settingsString);
+                }
+            } catch(e) { /* ignore */ }
+
+            // 对话历史（最近 50 条，供初始导入）
+            try {
+                if (Array.isArray(ctx.chat)) {
+                    result.chat = ctx.chat.slice(-50).map(function(m) {
+                        return {
+                            is_user: !!m.is_user,
+                            mes: String(m.mes || ''),
+                            send_date: m.send_date || 0,
+                        };
+                    });
+                }
+            } catch(e) { /* ignore */ }
+
+            return result;
+        } catch(e) {
+            return null;
+        }
     }
 
     console.log('[入口前端] 初始化完成，已准备好发送和接收事件。');

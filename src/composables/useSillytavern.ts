@@ -8,7 +8,7 @@ import {
   type Lorebook, type ChatPreset, type AppSettings, type ChatSession, type ChatMessage,
 } from '../sillytavern';
 import { useConversationTreeStore } from '../stores/conversationTree';
-import { isInSillyTavern, syncFromSt } from '../sillytavern/st-integration';
+import { isInSillyTavern, syncFromSt, hasStBridgeData } from '../sillytavern/st-integration';
 import { loadApiConfig } from '../stores/apiStorage';
 import { logRequest, logResponse, logError, logInfo } from '../stores/requestLogger';
 
@@ -38,6 +38,16 @@ export function useSillytavern() {
     activeLorebookIds.value = s?.activeLorebookIds || [];
     chats.value = c;
 
+    // Wait for postMessage bridge data (iframe mode) if in iframe but not yet received
+    if (!isInSillyTavern()) {
+      // We might be in an iframe — wait for bridge data from layer0.html
+      let waited = 0;
+      while (waited < 3000 && !hasStBridgeData) {
+        await new Promise(r => setTimeout(r, 100));
+        waited += 100;
+      }
+    }
+
     // Sync preset + lorebook from ST host environment (one-shot import if empty)
     if (isInSillyTavern()) {
       try {
@@ -51,7 +61,6 @@ export function useSillytavern() {
         });
         if (syncResult.connected) {
           console.log('[useSillytavern] ST sync result:', syncResult);
-          // Reload after sync
           if (syncResult.importedPreset || syncResult.importedLorebooks > 0 || syncResult.characterName) {
             const [l2, p2, s2] = await Promise.all([getLorebooks(), getPresets(), getSettings()]);
             lorebooks.value = l2;
@@ -204,8 +213,8 @@ export function useSillytavern() {
       if (activePreset.settings.pres_pen_openai !== undefined) requestBody.presence_penalty = activePreset.settings.pres_pen_openai;
       if (activePreset.settings.stream_openai !== undefined) requestBody.stream = activePreset.settings.stream_openai;
 
-      // 6. Log the request
-      logRequest(apiEndpoint, { model: activeModel, messageCount: promptMessages.length, systemPrompt: promptMessages.filter(m => m.role === 'system').map(m => m.content.slice(0, 200)).join('\n---\n') });
+      // 6. Log the full request
+      logRequest(apiEndpoint, requestBody);
 
       // 7. Call API
       let rawReply: string;
@@ -228,7 +237,7 @@ export function useSillytavern() {
 
         const data = await response.json();
         rawReply = data.choices?.[0]?.message?.content || '';
-        logResponse(response.status, rawReply.slice(0, 2000));
+        logResponse(response.status, data);
       } catch (err) {
         logError(String(err));
         throw err;

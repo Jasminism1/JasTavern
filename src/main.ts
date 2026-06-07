@@ -5,6 +5,10 @@ import App from './App.vue'
 import { isInSillyTavern } from './env'
 import { useAppStore } from './stores/app'
 import { initializeDatabase } from './sillytavern'
+import { listenForStBridge } from './sillytavern/st-integration'
+
+// Start listening for postMessage ST bridge data as early as possible
+listenForStBridge()
 
 async function mountApp() {
   let appEl: HTMLElement | null = null
