@@ -56,6 +56,7 @@ export function useSillytavern() {
           saveSettings,
           getPresets,
           savePreset,
+          deletePreset,
           getLorebooks,
           saveLorebook,
           deleteLorebook,

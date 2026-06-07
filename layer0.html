@@ -384,13 +384,15 @@
     // 从顶层窗口 IndexedDB 读取 ST 设置
     // ==============================================
     async function readSTIndexedDBSettings(topWindow) {
-        // ST stores presets in specific databases. Try known names first.
+        // Databases to EXCLUDE (our own app data)
+        var EXCLUDE_DBS = ['SillyTavernWebDB', 'sillytavern-ui', 'st-ui-conversations'];
+
+        // ST stores settings/presets in specific databases.
         var dbNameStoreMap = {
-            'SillyTavern_ChatCompletions': ['presets', 'ChatCompletions', 'chat_completions'],
-            'SillyTavern_Prompts': ['prompts', 'Prompts'],
-            'SillyTavern_TextCompletions': ['presets', 'TextCompletions'],
+            'SillyTavern_ChatCompletions': ['presets', 'preset', 'chatPresets', 'ChatCompletions', 'chat_completions'],
+            'SillyTavern_Prompts': ['prompts', 'Prompt', 'prompt', 'Prompts'],
+            'SillyTavern_TextCompletions': ['presets', 'preset', 'TextCompletions'],
             'SillyTavern': ['settings', 'Settings', 'presets', 'Presets'],
-            'st_main': ['settings', 'Settings'],
         };
         for (var dbName in dbNameStoreMap) {
             try {
@@ -402,9 +404,10 @@
                     req.onblocked = function() { resolve(null); };
                 });
                 if (!db) continue;
+                var actualStores = Array.from(db.objectStoreNames || []);
                 for (var si = 0; si < storeNames.length; si++) {
+                    if (!actualStores.includes(storeNames[si])) continue;
                     try {
-                        if (!db.objectStoreNames.contains(storeNames[si])) continue;
                         var records = await new Promise(function(res) {
                             var tx = db.transaction(storeNames[si], 'readonly');
                             var store = tx.objectStore(storeNames[si]);
@@ -412,12 +415,17 @@
                             getAll.onsuccess = function() { res(getAll.result); };
                             getAll.onerror = function() { res(null); };
                         });
-                        if (records && records.length > 0) {
-                            // Return the first record that's an object (most presets are the first item)
-                            if (records[0] && typeof records[0] === 'object') {
+                        if (!records || records.length === 0) continue;
+                        // Look for an object that looks like a ST preset
+                        for (var ri = 0; ri < records.length; ri++) {
+                            var r = records[ri];
+                            if (!r || typeof r !== 'object' || Array.isArray(r)) continue;
+                            // ST presets have specific fields — require at least one
+                            if (r.prompt_order || r.main || r.temperature || r.temp_openai ||
+                                r.character_description || r.personality || r.system_prompt) {
                                 db.close();
-                                console.log('[入口前端] ST 设置来源: ' + dbName + '/' + storeNames[si], records[0]);
-                                return records[0];
+                                console.log('[入口前端] ST 设置来源: ' + dbName + '/' + storeNames[si], r);
+                                return r;
                             }
                         }
                     } catch(e) {}
@@ -425,11 +433,12 @@
                 db.close();
             } catch(e) {}
         }
-        // Fallback: scan all IDB databases generically
+        // Fallback: generic scan of all IDB databases, excluding ours
         try {
             if (topWindow.indexedDB && topWindow.indexedDB.databases) {
                 var allDbs = await topWindow.indexedDB.databases();
                 for (var di = 0; di < allDbs.length; di++) {
+                    if (EXCLUDE_DBS.indexOf(allDbs[di].name) >= 0) continue;
                     var db2 = await new Promise(function(resolve) {
                         var req = topWindow.indexedDB.open(allDbs[di].name);
                         req.onsuccess = function() { resolve(req.result); };
@@ -438,6 +447,7 @@
                     });
                     if (!db2) continue;
                     var sNames = Array.from(db2.objectStoreNames || []);
+                    if (sNames.length === 0) { db2.close(); continue; }
                     for (var sj = 0; sj < sNames.length; sj++) {
                         try {
                             var recs = await new Promise(function(res) {
@@ -447,15 +457,16 @@
                                 getAll.onsuccess = function() { res(getAll.result); };
                                 getAll.onerror = function() { res(null); };
                             });
-                            if (recs) {
-                                for (var rj = 0; rj < recs.length; rj++) {
-                                    var r = recs[rj];
-                                    if (r && typeof r === 'object' && !Array.isArray(r) && Object.keys(r).length > 3) {
-                                        // Accept any non-trivial object as potential settings
-                                        db2.close();
-                                        console.log('[入口前端] ST 设置来源(gen): ' + allDbs[di].name + '/' + sNames[sj], r);
-                                        return r;
-                                    }
+                            if (!recs) continue;
+                            for (var rj = 0; rj < recs.length; rj++) {
+                                var r = recs[rj];
+                                if (!r || typeof r !== 'object' || Array.isArray(r)) continue;
+                                // Must have ST preset fingerprint
+                                if (r.prompt_order || r.main || r.temperature || r.temp_openai ||
+                                    r.character_description || r.character_personality) {
+                                    db2.close();
+                                    console.log('[入口前端] ST 设置来源(gen): ' + allDbs[di].name + '/' + sNames[sj], r);
+                                    return r;
                                 }
                             }
                         } catch(e) {}

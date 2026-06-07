@@ -257,6 +257,7 @@ export async function syncFromSt(
     saveSettings: (s: AppSettings) => Promise<void>;
     getPresets: () => Promise<ChatPreset[]>;
     savePreset: (p: ChatPreset) => Promise<string>;
+    deletePreset: (id: string) => Promise<void>;
     getLorebooks: () => Promise<Lorebook[]>;
     saveLorebook: (l: Lorebook) => Promise<string>;
     deleteLorebook: (id: string) => Promise<void>;
@@ -304,32 +305,23 @@ export async function syncFromSt(
     }
   }
 
-  // B. Import preset from ST (always update first preset with ST data)
+  // B. Import preset from ST (always replace first preset with fresh ST data)
   const stPreset = readStPreset();
   if (stPreset) {
     const existingPresets = await context.getPresets();
-    if (existingPresets.length === 0) {
-      // No presets at all — create one from ST
-      const preset: ChatPreset = sanitize({
-        ...stPreset.preset,
-        id: crypto.randomUUID(),
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      });
-      await context.savePreset(preset);
-      result.importedPreset = true;
-    } else {
-      // Update the first preset with ST data (preserve its id)
-      const target = existingPresets[0];
-      const updated: ChatPreset = sanitize({
-        ...target,
-        name: stPreset.preset.name,
-        settings: { ...target.settings, ...stPreset.preset.settings },
-        updatedAt: Date.now(),
-      });
-      await context.savePreset(updated);
-      result.importedPreset = true;
+    // Remove ALL existing presets to clean stale data from previous bad imports
+    for (const old of existingPresets) {
+      try { await context.deletePreset(old.id); } catch { /* ignore */ }
     }
+    // Create fresh preset from ST data
+    const preset: ChatPreset = sanitize({
+      ...stPreset.preset,
+      id: crypto.randomUUID(),
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    await context.savePreset(preset);
+    result.importedPreset = true;
   }
 
   // C. Import world info from ST (always re-import, replacing previous ST books)
