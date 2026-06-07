@@ -58,6 +58,7 @@ export function useSillytavern() {
           savePreset,
           getLorebooks,
           saveLorebook,
+          deleteLorebook,
         });
         if (syncResult.connected) {
           console.log('[useSillytavern] ST sync result:', syncResult);
@@ -273,7 +274,7 @@ export function useSillytavern() {
         variables: nextVariables,
         updatedAt: Date.now(),
       };
-      await saveChat(updatedChat);
+      await saveChat(JSON.parse(JSON.stringify(updatedChat)));
       chats.value = chats.value.map(c => c.id === updatedChat.id ? updatedChat : c);
 
       return { reply, extractedVars, nextVariables };

@@ -278,6 +278,7 @@ export async function syncFromSt(
     savePreset: (p: ChatPreset) => Promise<string>;
     getLorebooks: () => Promise<Lorebook[]>;
     saveLorebook: (l: Lorebook) => Promise<string>;
+    deleteLorebook: (id: string) => Promise<void>;
   }
 ): Promise<StSyncResult> {
   const result: StSyncResult = {
@@ -300,11 +301,12 @@ export async function syncFromSt(
     result.characterName = char?.name || null;
   }
 
-  // B. Import preset from ST (only if none exist)
-  const existingPresets = await context.getPresets();
-  if (existingPresets.length === 0) {
-    const stPreset = readStPreset();
-    if (stPreset) {
+  // B. Import preset from ST (always update first preset with ST data)
+  const stPreset = readStPreset();
+  if (stPreset) {
+    const existingPresets = await context.getPresets();
+    if (existingPresets.length === 0) {
+      // No presets at all — create one from ST
       const preset: ChatPreset = sanitize({
         ...stPreset.preset,
         id: crypto.randomUUID(),
@@ -313,13 +315,31 @@ export async function syncFromSt(
       });
       await context.savePreset(preset);
       result.importedPreset = true;
+    } else {
+      // Update the first preset with ST data (preserve its id)
+      const target = existingPresets[0];
+      const updated: ChatPreset = sanitize({
+        ...target,
+        name: stPreset.preset.name,
+        settings: { ...target.settings, ...stPreset.preset.settings },
+        updatedAt: Date.now(),
+      });
+      await context.savePreset(updated);
+      result.importedPreset = true;
     }
   }
 
-  // C. Import world info from ST (only if none exist)
-  const existingBooks = await context.getLorebooks();
-  if (existingBooks.length === 0) {
-    const stBooks = readStWorldInfo();
+  // C. Import world info from ST (always re-import, replacing previous ST books)
+  const stBooks = readStWorldInfo();
+  if (stBooks.length > 0) {
+    // Remove any previously imported ST books
+    const existingBooks = await context.getLorebooks();
+    const stBookNames = new Set(['ST 世界书']);
+    for (const old of existingBooks) {
+      if (stBookNames.has(old.name)) {
+        try { await context.deleteLorebook(old.id); } catch { /* ignore */ }
+      }
+    }
     for (const book of stBooks) {
       const lb: Lorebook = sanitize({
         ...book,
