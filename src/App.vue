@@ -31,9 +31,9 @@
     </div>
   </Transition>
 
-  <!-- 悬浮"进入游戏"按钮（未激活时显示在酒馆右上角） -->
+  <!-- 悬浮"进入游戏"按钮（仅独立开发模式显示） -->
   <button
-    v-if="!isUIActive"
+    v-if="!isUIActive && !isInSillyTavernEnv"
     class="enter-btn"
     @click="enterUI"
   >
@@ -45,6 +45,7 @@
 import { computed, ref } from 'vue'
 import { useAppStore }        from './stores/app'
 import { useBackgroundStore } from './stores/background'
+import { isInSillyTavern }    from './bridge'
 import TopBar        from './components/TopBar.vue'
 import PortraitLayer from './components/PortraitLayer.vue'
 import DialoguePanel from './components/DialoguePanel.vue'
@@ -53,6 +54,7 @@ import StatusPanel   from './components/StatusPanel.vue'
 const store      = useAppStore()
 const bgStore    = useBackgroundStore()
 const isUIActive = computed(() => store.isUIActive)
+const isInSillyTavernEnv = computed(() => isInSillyTavern())
 const portraitRef = ref<InstanceType<typeof PortraitLayer> | null>(null)
 
 function enterUI() { store.enterUI() }
@@ -79,6 +81,25 @@ html, body { height: 100%; background: #0a0a12; color: #ccc; font-family: system
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+
+/* ---- SillyTavern 全屏覆盖层重置 ---- */
+#st-custom-ui-root {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 999999;
+  background-color: transparent; /* Allow enter button to float over ST bg */
+  overflow: hidden;
+  box-sizing: border-box;
+  pointer-events: none; /* Let clicks pass through when UI is inactive */
+}
+
+#st-custom-ui-root .game-shell,
+#st-custom-ui-root .enter-btn {
+  pointer-events: auto; /* Re-enable pointer events for active UI elements */
+}
 </style>
 
 <style scoped>
@@ -108,18 +129,20 @@ html, body { height: 100%; background: #0a0a12; color: #ccc; font-family: system
   overflow: hidden;
 }
 
-/* ---- 进入按钮 ---- */
+/* ---- 进入按钮（修改为居中且加大面积） ---- */
 .enter-btn {
   position: fixed;
-  top: 12px;
-  right: 12px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   z-index: 8888;
-  padding: 6px 14px;
+  /* 扩大可点击面积 */
+  padding: 18px 36px;
+  font-size: 24px;
   background: #1a2535;
   border: 1px solid #3a5a8a;
   border-radius: 6px;
   color: #7ab;
-  font-size: 13px;
   cursor: pointer;
 }
 .enter-btn:hover { background: #253545; }

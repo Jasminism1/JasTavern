@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>RPG 游戏入口</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            background-color: transparent; /* 酒馆楼层中必须透明 */
+            color: #e0e0e0;
+        }
+
+        .entry-container {
+            padding: 30px;
+            border: 1px solid #445;
+            border-radius: 12px;
+            background: linear-gradient(145deg, #161622, #1a1a2b);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            position: relative;
+            overflow: hidden;
+            text-align: center;
+        }
+
+        .content-wrapper h1 {
+            color: #4da6ff;
+            margin-top: 0;
+            margin-bottom: 15px;
+            font-size: 1.8em;
+            text-shadow: 0 0 10px rgba(77, 166, 255, 0.3);
+        }
+
+        .content-wrapper p {
+            line-height: 1.6;
+            margin-bottom: 25px;
+            font-size: 1em;
+            color: #aaa;
+        }
+
+        .start-button {
+            padding: 14px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            color: #fff;
+            background: linear-gradient(to bottom, #2d5a88, #1a3a5c);
+            border: 1px solid #4da6ff;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            box-shadow: 0 0 12px rgba(77, 166, 255, 0.4);
+        }
+
+        .start-button:hover {
+            background: linear-gradient(to bottom, #3b74b1, #234c7a);
+            box-shadow: 0 0 20px rgba(77, 166, 255, 0.7);
+            transform: translateY(-1px);
+        }
+
+        .start-button:active {
+            transform: translateY(1px);
+        }
+
+        #status-summary {
+            margin-top: 15px;
+            font-size: 13px;
+            color: #667;
+        }
+    </style>
+</head>
+<body>
+
+<div class="entry-container">
+    <div class="content-wrapper">
+        <h1>🗡️ 踏上新的旅途</h1>
+        <p>你即将进入一个全屏交互式的冒险世界。<br>（请确保你已在酒馆助手中启用了 UI 注入脚本）</p>
+        
+        <button id="start-game-btn" class="start-button">
+            ▶ 进入游戏 UI
+        </button>
+        
+        <div id="status-summary">等待进入...</div>
+    </div>
+</div>
+
+<script>
+(function() {
+    'use strict';
+
+    // 检查 SillyTavern 事件系统是否可用
+    if (typeof eventEmit === 'undefined') {
+        console.error('[第0层入口] SillyTavern 事件系统未找到。如果你不在酒馆内，此按钮无效。');
+        const status = document.getElementById('status-summary');
+        if (status) status.innerHTML = '<span style="color:#ff6b6b;">错误：未检测到酒馆环境。</span>';
+        return;
+    }
+
+    const startButton = document.getElementById('start-game-btn');
+    const statusSummary = document.getElementById('status-summary');
+
+    startButton.addEventListener('click', () => {
+        console.log('[第0层入口] 正在请求接管主 UI...');
+        statusSummary.textContent = '正在注入并启动 UI...';
+        
+        // 触发通过 JS-Slash-Runner 监听的自定义事件
+        eventEmit('st_ui:show_main_ui');
+    });
+
+})();
+</script>
+
+</body>
+</html>
