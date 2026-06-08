@@ -10,6 +10,7 @@ import {
   type Lorebook, type ChatPreset, type AppSettings, type ChatSession, type ChatMessage,
 } from '../sillytavern';
 import { useConversationTreeStore } from '../stores/conversationTree';
+import { usePresetStore } from '../stores/presetStore';
 import { loadApiConfig } from '../stores/apiStorage';
 import { logRequest, logResponse, logError, logInfo } from '../stores/requestLogger';
 
@@ -57,11 +58,6 @@ export function useSillytavern() {
     chats.value = c;
 
     isLoading.value = false;
-  };
-
-  /** Call after external components (e.g. PresetPanel) save to Dexie to keep presets in sync. */
-  const refreshPresets = async () => {
-    presets.value = await getPresets();
   };
 
   const activeChat = computed(() => chats.value.find(c => c.id === activeChatId.value) || null);
@@ -158,8 +154,14 @@ export function useSillytavern() {
       // 1. Ensure conversation tree is ready
       tree.ensureRoot();
 
-      const activePreset = presets.value.find(p => p.id === s.activePresetId) || presets.value[0];
-      if (!activePreset) throw new Error('No preset available');
+      // Read active preset from the Pinia store (single source of truth)
+      const presetStore = usePresetStore();
+      const structuredPreset = presetStore.activeStructured;
+      const activePreset = presetStore.activePreset;
+
+      // Fallback: if store has no active preset, use the legacy composable list
+      const presetForAssembly = activePreset || presets.value.find(p => p.id === s.activePresetId) || presets.value[0];
+      if (!presetForAssembly) throw new Error('No preset available');
 
       const activeBooks = lorebooks.value.filter(b => activeLorebookIds.value.includes(b.id));
       const currentVariables = ac.variables || {};
@@ -176,16 +178,13 @@ export function useSillytavern() {
       // 3. Now add user message to conversation tree (for display; not for prompt history)
       tree.onNewMessage(content, 'user');
 
-      // 4. Extract structuredPreset from active preset (P1 saved presets embed it in settings)
-      const structuredPreset = activePreset.settings?._structuredPreset || undefined;
-
-      // 5. Assemble prompt with lorebooks + preset + macro registry
-      const activeModel = apiConfig.model || activePreset.settings.openai_model || 'gpt-3.5-turbo';
+      // 4. Assemble prompt with lorebooks + preset + macro registry
+      const activeModel = apiConfig.model || presetForAssembly.settings.openai_model || 'gpt-3.5-turbo';
 
       const assembleResult = assemblePrompt({
         userInput: content,
         history: treeMessages,
-        preset: activePreset,
+        preset: presetForAssembly,
         lorebooks: activeBooks,
         userName: s.userName,
         characterName: s.characterName,
@@ -193,7 +192,7 @@ export function useSillytavern() {
         macroRegistry,
         model: activeModel,
         formatPrompt: s.formatPromptTemplate || undefined,
-        structuredPreset,
+        structuredPreset: structuredPreset || undefined,
       });
 
       const requestBody: Record<string, any> = {
@@ -220,12 +219,12 @@ export function useSillytavern() {
         if (structuredPreset.sampling.stop.length > 0) requestBody.stop = structuredPreset.sampling.stop;
         if (structuredPreset.messaging.stream !== undefined) requestBody.stream = structuredPreset.messaging.stream;
       } else {
-        if (activePreset.settings.temp_openai !== undefined) requestBody.temperature = activePreset.settings.temp_openai;
-        if (activePreset.settings.openai_max_tokens !== undefined) requestBody.max_tokens = activePreset.settings.openai_max_tokens;
-        if (activePreset.settings.top_p_openai !== undefined) requestBody.top_p = activePreset.settings.top_p_openai;
-        if (activePreset.settings.freq_pen_openai !== undefined) requestBody.frequency_penalty = activePreset.settings.freq_pen_openai;
-        if (activePreset.settings.pres_pen_openai !== undefined) requestBody.presence_penalty = activePreset.settings.pres_pen_openai;
-        if (activePreset.settings.stream_openai !== undefined) requestBody.stream = activePreset.settings.stream_openai;
+        if (presetForAssembly.settings.temp_openai !== undefined) requestBody.temperature = presetForAssembly.settings.temp_openai;
+        if (presetForAssembly.settings.openai_max_tokens !== undefined) requestBody.max_tokens = presetForAssembly.settings.openai_max_tokens;
+        if (presetForAssembly.settings.top_p_openai !== undefined) requestBody.top_p = presetForAssembly.settings.top_p_openai;
+        if (presetForAssembly.settings.freq_pen_openai !== undefined) requestBody.frequency_penalty = presetForAssembly.settings.freq_pen_openai;
+        if (presetForAssembly.settings.pres_pen_openai !== undefined) requestBody.presence_penalty = presetForAssembly.settings.pres_pen_openai;
+        if (presetForAssembly.settings.stream_openai !== undefined) requestBody.stream = presetForAssembly.settings.stream_openai;
       }
 
       // Post-clean: remove local-only sampling params that target API rejects
@@ -355,7 +354,6 @@ export function useSillytavern() {
     isSending: computed(() => isSending.value),
     isLoading: computed(() => isLoading.value),
     loadAll,
-    refreshPresets,
     toggleLorebook,
     updateSettings,
     createChat,
