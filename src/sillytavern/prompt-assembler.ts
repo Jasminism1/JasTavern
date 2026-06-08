@@ -70,24 +70,25 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
   }
 
   // ---- 4. Build macro context ----
-  const recentHistory: { role: 'system' | 'user' | 'assistant'; content: string }[] = [];
+  // Step A: collect raw history first (cannot resolve macros yet — macroCtx not built)
+  const rawHistory: { role: 'system' | 'user' | 'assistant'; content: string }[] = [];
   for (let i = history.length - 1; i >= 0; i--) {
     const msg = history[i];
     if (msg.role === 'system') continue;
     const msgTokens = msg.content.length / 4;
     if (currentTokens + msgTokens > maxContextTokens * 0.8) break;
-    const resolvedContent = replaceMacros(msg.content, macroCtx, macroRegistry);
-    recentHistory.unshift({ role: msg.role, content: resolvedContent });
-    currentTokens += resolvedContent.length / 4;
+    rawHistory.unshift({ role: msg.role, content: msg.content });
+    currentTokens += msgTokens;
   }
 
+  // Step B: build macroCtx from raw history
   const macroCtx: MacroContext = buildMacroContext({
     userName, characterName, userInput, variables, model,
-    preset, structuredPreset, recentHistory, macroRegistry,
+    preset, structuredPreset, recentHistory: rawHistory, macroRegistry,
   });
 
-  // Re-resolve history with full macroCtx now that it's built
-  const resolvedHistory = recentHistory.map(h => ({
+  // Step C: now re-resolve history messages with macroCtx
+  const recentHistory = rawHistory.map(h => ({
     ...h,
     content: replaceMacros(h.content, macroCtx, macroRegistry),
   }));
@@ -207,7 +208,7 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
 
   // Build interleaved message list
   const interleavedMessages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [];
-  const hLen = resolvedHistory.length;
+  const hLen = recentHistory.length;
 
   // Walk history from oldest to newest, inserting depth items at the right points
   // depth=0: after last history message (before user input)
@@ -227,7 +228,7 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
     for (const item of itemsHere) {
       interleavedMessages.push({ role: item.role, content: item.content });
     }
-    interleavedMessages.push(resolvedHistory[i]);
+    interleavedMessages.push(recentHistory[i]);
   }
 
   // Items at depth 0 (after last message, before user input)
