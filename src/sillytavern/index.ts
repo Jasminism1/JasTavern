@@ -12,6 +12,5 @@ export * from './stream-parser';
 export * from './vars-merger';
 export * from './api-router';
 export * from './editor-utils';
-export * from './st-integration';
 
 export const VERSION = '3.0.0';

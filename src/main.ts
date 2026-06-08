@@ -2,13 +2,7 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
-import { isInSillyTavern } from './env'
-import { useAppStore } from './stores/app'
 import { initializeDatabase } from './sillytavern'
-import { listenForStBridge } from './sillytavern/st-integration'
-
-// Start listening for postMessage ST bridge data as early as possible
-listenForStBridge()
 
 async function mountApp() {
   let appEl: HTMLElement | null = null
@@ -24,26 +18,14 @@ async function mountApp() {
   const app = createApp(App)
   app.use(createPinia())
 
-  if (isInSillyTavern()) {
-    if (!document.getElementById('st-custom-ui-root')) {
-      const rootDiv = document.createElement('div')
-      rootDiv.id = 'st-custom-ui-root'
-      document.body.appendChild(rootDiv)
-    }
-    app.mount('#st-custom-ui-root')
-
-    // Automatically enter the UI since the mount was triggered by the Layer 0 button
-    useAppStore().enterUI()
-  } else {
-    appEl = document.getElementById('app')
-    if (!appEl) {
-      // Fallback: create mount point if #app is missing
-      appEl = document.createElement('div')
-      appEl.id = 'app'
-      document.body.appendChild(appEl)
-    }
-    app.mount(appEl)
+  appEl = document.getElementById('app')
+  if (!appEl) {
+    // Fallback: create mount point if #app is missing
+    appEl = document.createElement('div')
+    appEl.id = 'app'
+    document.body.appendChild(appEl)
   }
+  app.mount(appEl)
 }
 
 // Make sure DOMContentLoaded is not missed even if the IIFE executes before body is parsed
@@ -51,7 +33,7 @@ function bootstrap() {
   mountApp().catch(err => {
     console.error('[JasTavern] Fatal mount error:', err)
     // Show fallback UI so the user knows something is broken, not just a blank page
-    const root = document.getElementById('app') || document.getElementById('st-custom-ui-root') || document.body
+    const root = document.getElementById('app') || document.body
     root.innerHTML += `<div style="
       position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
       z-index:99999;padding:20px 32px;background:#2a1a1a;border:1px solid #a44;

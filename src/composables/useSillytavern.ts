@@ -8,7 +8,6 @@ import {
   type Lorebook, type ChatPreset, type AppSettings, type ChatSession, type ChatMessage,
 } from '../sillytavern';
 import { useConversationTreeStore } from '../stores/conversationTree';
-import { isInSillyTavern, syncFromSt, hasStBridgeData } from '../sillytavern/st-integration';
 import { loadApiConfig } from '../stores/apiStorage';
 import { logRequest, logResponse, logError, logInfo } from '../stores/requestLogger';
 
@@ -37,44 +36,6 @@ export function useSillytavern() {
     settings.value = s || null;
     activeLorebookIds.value = s?.activeLorebookIds || [];
     chats.value = c;
-
-    // Wait for postMessage bridge data (iframe mode) if in iframe but not yet received
-    if (!isInSillyTavern()) {
-      // We might be in an iframe — wait for bridge data from layer0.html
-      let waited = 0;
-      while (waited < 3000 && !hasStBridgeData) {
-        await new Promise(r => setTimeout(r, 100));
-        waited += 100;
-      }
-    }
-
-    // Sync preset + lorebook from ST host environment (one-shot import if empty)
-    if (isInSillyTavern()) {
-      try {
-        const syncResult = await syncFromSt({
-          getSettings,
-          saveSettings,
-          getPresets,
-          savePreset,
-          deletePreset,
-          getLorebooks,
-          saveLorebook,
-          deleteLorebook,
-        });
-        if (syncResult.connected) {
-          console.log('[useSillytavern] ST sync result:', syncResult);
-          if (syncResult.importedPreset || syncResult.importedLorebooks > 0 || syncResult.characterName) {
-            const [l2, p2, s2] = await Promise.all([getLorebooks(), getPresets(), getSettings()]);
-            lorebooks.value = l2;
-            presets.value = p2;
-            settings.value = s2 || null;
-            activeLorebookIds.value = s2?.activeLorebookIds || [];
-          }
-        }
-      } catch (err) {
-        console.warn('[useSillytavern] ST sync failed (non-fatal):', err);
-      }
-    }
 
     isLoading.value = false;
   };

@@ -3,9 +3,6 @@
     <div class="setting-group">
       <h4>API 连接配置</h4>
       <p class="api-notice">API Key 仅保存在浏览器本地，不会被提交到 Git。</p>
-      <div v-if="stConnected" class="st-info">
-        已检测到酒馆环境 — 角色名、预设和世界书已自动导入。请在下方配置 API Key。
-      </div>
 
       <div class="setting-item">
         <label>接口地址 (Base URL)</label>
@@ -62,11 +59,8 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { isInSillyTavern } from '../../sillytavern/st-integration';
 import { saveApiConfig, loadApiConfig, type ApiConfig } from '../../stores/apiStorage';
 import { logRequest, logResponse, logError } from '../../stores/requestLogger';
-
-const stConnected = ref(isInSillyTavern());
 
 const localApi = ref<ApiConfig>({
   baseUrl: 'https://api.openai.com/v1',

@@ -31,9 +31,9 @@
     </div>
   </Transition>
 
-  <!-- 悬浮"进入游戏"按钮（仅独立开发模式显示） -->
+  <!-- 悬浮"进入游戏"按钮（UI 未激活时显示） -->
   <button
-    v-if="!isUIActive && !isInSillyTavernEnv"
+    v-if="!isUIActive"
     class="enter-btn"
     @click="enterUI"
   >
@@ -45,7 +45,6 @@
 import { computed, ref } from 'vue'
 import { useAppStore }        from './stores/app'
 import { useBackgroundStore } from './stores/background'
-import { isInSillyTavern }    from './env'
 import TopBar        from './components/TopBar.vue'
 import PortraitLayer from './components/PortraitLayer.vue'
 import DialoguePanel from './components/DialoguePanel.vue'
@@ -54,7 +53,6 @@ import StatusPanel   from './components/StatusPanel.vue'
 const store      = useAppStore()
 const bgStore    = useBackgroundStore()
 const isUIActive = computed(() => store.isUIActive)
-const isInSillyTavernEnv = computed(() => isInSillyTavern())
 const portraitRef = ref<InstanceType<typeof PortraitLayer> | null>(null)
 
 function enterUI() { store.enterUI() }
