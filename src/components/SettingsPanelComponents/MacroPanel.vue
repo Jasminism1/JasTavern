@@ -52,7 +52,11 @@ const categoryOrder: MacroCategory[] = ['character', 'context', 'system', 'custo
 
 const registryEnabled = ref(macroRegistry.enabled);
 
+const triggerTick = ref(0);
+const bump = () => { triggerTick.value++; };
+
 const groupedMacros = computed(() => {
+  void triggerTick.value; // dependency — re-evaluates on every bump
   const map = new Map<MacroCategory, any[]>();
   for (const m of macroRegistry.list()) {
     if (!map.has(m.category)) map.set(m.category, []);
@@ -90,25 +94,24 @@ function resolvePreview(macro: { name: string }): string {
 }
 
 function toggleRegistry() {
-  const next = !macroRegistry.enabled;
-  macroRegistry.setEnabled(next);
-  registryEnabled.value = next;
+  macroRegistry.setEnabled(!macroRegistry.enabled);
+  registryEnabled.value = macroRegistry.enabled;
+  bump();
 }
 
 function toggleMacro(name: string) {
   macroRegistry.toggle(name);
-  // Trigger reactivity by toggling the registryEnabled ref
-  registryEnabled.value = macroRegistry.enabled;
+  bump();
 }
 
 function enableAll() {
   macroRegistry.enableAll();
-  registryEnabled.value = macroRegistry.enabled;
+  bump();
 }
 
 function disableAll() {
   macroRegistry.disableAll();
-  registryEnabled.value = macroRegistry.enabled;
+  bump();
 }
 </script>
 

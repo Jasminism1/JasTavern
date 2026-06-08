@@ -54,8 +54,10 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
     if (msg.role === 'system') continue;
     const msgTokens = msg.content.length / 4;
     if (currentTokens + msgTokens > maxContextTokens * 0.8) break;
-    recentHistory.unshift({ role: msg.role, content: msg.content });
-    currentTokens += msgTokens;
+    // Apply macro replacement to history messages ({{char}}, {{user}}, etc.)
+    const resolvedContent = replaceMacros(msg.content, macroCtx, macroRegistry);
+    recentHistory.unshift({ role: msg.role, content: resolvedContent });
+    currentTokens += resolvedContent.length / 4;
   }
 
   // ---- Build macro context from available data ----
@@ -166,18 +168,18 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
 
   const variablesBlock = formatVariablesForPrompt(variables || {});
   if (variablesBlock) {
-    systemAccumulator += (systemAccumulator ? '\n\n' : '') + variablesBlock;
+    systemAccumulator += (systemAccumulator ? '\n\n' : '') + replaceMacros(variablesBlock, macroCtx, macroRegistry);
   }
 
   if (extraVariables && Object.keys(extraVariables).length > 0) {
     const extraBlock = formatVariablesForPrompt(extraVariables);
     if (extraBlock) {
-      systemAccumulator += (systemAccumulator ? '\n\n' : '') + extraBlock;
+      systemAccumulator += (systemAccumulator ? '\n\n' : '') + replaceMacros(extraBlock, macroCtx, macroRegistry);
     }
   }
 
   if (formatPrompt) {
-    systemAccumulator += (systemAccumulator ? '\n\n' : '') + formatPrompt;
+    systemAccumulator += (systemAccumulator ? '\n\n' : '') + replaceMacros(formatPrompt, macroCtx, macroRegistry);
   }
 
   if (systemAccumulator) {
@@ -188,7 +190,9 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
     assembledMessages.push(...recentHistory);
   }
 
-  assembledMessages.push({ role: 'user', content: userInput });
+  // Apply macro replacement to user input
+  const resolvedUserInput = replaceMacros(userInput, macroCtx, macroRegistry);
+  assembledMessages.push({ role: 'user', content: resolvedUserInput });
 
   const systemPrompt = assembledMessages
     .filter(m => m.role === 'system')
