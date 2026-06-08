@@ -20,7 +20,7 @@ export interface CharacterStatus {
   outfit?: string
 }
 
-export type ModalId = 'map' | 'character' | 'log' | 'settings' | 'others'
+export type ModalId = 'map' | 'character' | 'log' | 'settings' | 'others' | 'preset'
 
 export const useAppStore = defineStore('app', () => {
   const isUIActive = ref(false)

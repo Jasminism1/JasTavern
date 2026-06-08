@@ -48,6 +48,7 @@ import MapPanel from './MapPanel.vue'
 import CharDetailPanel from './CharDetailPanel.vue'
 import EventLogPanel from './EventLogPanel.vue'
 import SettingsPanel from './SettingsPanel.vue'
+import PresetPanel from './SettingsPanelComponents/PresetPanel.vue'
 import OthersPanel from './OthersPanel.vue'
 
 const store = useAppStore()
@@ -92,15 +93,16 @@ const navButtons: { id: ModalId; label: string }[] = [
   { id: 'map',       label: '🗺️ 地图' },
   { id: 'character', label: '👤 角色' },
   { id: 'log',       label: '📖 记录' },
+  { id: 'preset',    label: '📋 预设' },
   { id: 'others',    label: '✨ 其他' },
 ]
 
 const panelMap: Record<string, any> = {
-  map: MapPanel, character: CharDetailPanel, log: EventLogPanel, settings: SettingsPanel, others: OthersPanel
+  map: MapPanel, character: CharDetailPanel, log: EventLogPanel, settings: SettingsPanel, preset: PresetPanel, others: OthersPanel
 }
 
 const currentModalLabel = computed(() => {
-  const labels: any = { map:'地图', character:'角色', log:'记录', settings:'设置', others:'其他' }
+  const labels: any = { map:'地图', character:'角色', log:'记录', settings:'设置', preset:'预设', others:'其他' }
   return activeModal.value ? labels[activeModal.value] : ''
 })
 
