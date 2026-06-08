@@ -42,6 +42,9 @@
 
       <!-- 请求日志 -->
       <RequestLogPanel v-if="activeTab === 'log'" />
+
+      <!-- 宏管理 -->
+      <MacroPanel v-if="activeTab === 'macro'" />
     </div>
   </div>
   <!-- 保存按钮（调整布局结构，仅改外层容器类名） -->
@@ -61,6 +64,7 @@ import RecallingPanel from './SettingsPanelComponents/RecallingPanel.vue'
 import OtherPanel from './SettingsPanelComponents/OtherPanel.vue'
 import ApiPanel from './SettingsPanelComponents/ApiPanel.vue'
 import RequestLogPanel from './SettingsPanelComponents/RequestLogPanel.vue'
+import MacroPanel from './SettingsPanelComponents/MacroPanel.vue'
 
 // 使用设置状态管理（如果需要全局共享设置状态）
 const settingsStore = useSettingsStore()
@@ -74,6 +78,7 @@ const tabs = ref([
   { key: 'recall', name: '回想' },
   { key: 'api', name: 'API' },
   { key: 'log', name: '日志' },
+  { key: 'macro', name: '宏' },
   { key: 'other', name: '其他' }
 ])
 // 默认激活的标签（界面）

@@ -5,6 +5,7 @@
 import type { ChatPreset, Lorebook, ChatMessage, MatchedEntry } from './types';
 import { createLorebookEngine } from './lorebook-engine';
 import { formatVariablesForPrompt } from './variables';
+import { MacroRegistry, type MacroContext } from './macros';
 
 export interface AssembleOptions {
   userInput: string;
@@ -16,6 +17,10 @@ export interface AssembleOptions {
   variables?: Record<string, string | number>;
   extraVariables?: Record<string, any>;
   formatPrompt?: string;
+  /** Optional macro registry for {{user}}, {{char}}, etc. */
+  macroRegistry?: MacroRegistry;
+  /** Current model name for {{model}} macro */
+  model?: string;
 }
 
 export interface AssembleResult {
@@ -25,7 +30,7 @@ export interface AssembleResult {
 }
 
 export function assemblePrompt(options: AssembleOptions): AssembleResult {
-  const { userInput, history, preset, lorebooks, userName, characterName, variables, extraVariables, formatPrompt } = options;
+  const { userInput, history, preset, lorebooks, userName, characterName, variables, extraVariables, formatPrompt, macroRegistry, model } = options;
 
   const allMatchedEntries: MatchedEntry[] = [];
   const scanText = userInput + ' ' + history.slice(-3).map(m => m.content).join(' ');
@@ -52,6 +57,25 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
     recentHistory.unshift({ role: msg.role, content: msg.content });
     currentTokens += msgTokens;
   }
+
+  // ---- Build macro context from available data ----
+  const lastUserMsg = [...recentHistory].reverse().find(m => m.role === 'user');
+  const lastCharMsg = [...recentHistory].reverse().find(m => m.role === 'assistant');
+  const lastAnyMsg = recentHistory.length > 0 ? recentHistory[recentHistory.length - 1] : null;
+
+  const macroCtx: MacroContext = {
+    userName,
+    characterName,
+    userInput,
+    variables,
+    model: model ?? preset.settings.openai_model ?? null,
+    characterDescription: preset.settings.character_description ?? null,
+    characterPersonality: preset.settings.character_personality ?? null,
+    scenario: preset.settings.scenario ?? null,
+    lastMessage: lastAnyMsg?.content ?? null,
+    lastUserMessage: lastUserMsg?.content ?? null,
+    lastCharMessage: lastCharMsg?.content ?? null,
+  };
 
   const promptOrder = (preset.settings.prompt_order || []) as Array<{
     identifier: string;
@@ -125,7 +149,7 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
     const rawContent = resolvePromptContent(item.identifier);
     if (!rawContent) continue;
 
-    let content = replaceMacros(rawContent, { userName, characterName, userInput, variables });
+    let content = replaceMacros(rawContent, macroCtx, macroRegistry);
     if (!content.trim()) continue;
 
     const role = item.role || 'system';
@@ -185,7 +209,21 @@ interface MacroContext {
   variables?: Record<string, string | number>;
 }
 
-export function replaceMacros(template: string, context: MacroContext): string {
+/**
+ * Replace macros in a template string. Uses the macro registry when available,
+ * falling back to legacy hardcoded behavior for backwards compatibility.
+ */
+export function replaceMacros(
+  template: string,
+  context: MacroContext,
+  registry?: MacroRegistry,
+): string {
+  // If a registry is provided, delegate resolution to it
+  if (registry && registry.enabled) {
+    return registry.replaceAll(template, context);
+  }
+
+  // Legacy fallback (no registry) — keep existing behavior
   let result = template
     .replace(/\{\{user\}\}/g, context.userName)
     .replace(/\{\{char\}\}/g, context.characterName)

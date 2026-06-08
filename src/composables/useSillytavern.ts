@@ -5,11 +5,15 @@ import {
   getSettings, saveSettings, initializeDatabase,
   getChats, saveChat, deleteChat as deleteChatById,
   assemblePrompt, extractVariables, mergeVariables, USER_ROLE, truncateChatAt, branchChat,
+  createDefaultRegistry, MacroRegistry,
   type Lorebook, type ChatPreset, type AppSettings, type ChatSession, type ChatMessage,
 } from '../sillytavern';
 import { useConversationTreeStore } from '../stores/conversationTree';
 import { loadApiConfig } from '../stores/apiStorage';
 import { logRequest, logResponse, logError, logInfo } from '../stores/requestLogger';
+
+/** Global macro registry — shared across all components. */
+export const macroRegistry: MacroRegistry = createDefaultRegistry();
 
 export function useSillytavern() {
   const lorebooks = ref<Lorebook[]>([]);
@@ -153,6 +157,9 @@ export function useSillytavern() {
       }));
 
       // 4. Assemble prompt with lorebooks + preset
+      // 5. Build API request — user's configured model takes priority over preset default
+      const activeModel = apiConfig.model || activePreset.settings.openai_model;
+
       const { messages: promptMessages } = assemblePrompt({
         userInput: content,
         history: treeMessages,
@@ -161,10 +168,10 @@ export function useSillytavern() {
         userName: s.userName,
         characterName: s.characterName,
         variables: currentVariables,
+        macroRegistry,
+        model: activeModel,
+        formatPrompt: s.formatPromptTemplate || undefined,
       });
-
-      // 5. Build API request — user's configured model takes priority over preset default
-      const activeModel = apiConfig.model || activePreset.settings.openai_model;
       const requestBody: Record<string, any> = {
         model: activeModel,
         messages: promptMessages,
