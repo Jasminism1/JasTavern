@@ -6,6 +6,7 @@ import {
   getChats, saveChat, deleteChat as deleteChatById,
   assemblePrompt, extractVariables, mergeVariables, USER_ROLE, truncateChatAt, branchChat,
   createDefaultRegistry, MacroRegistry,
+  LOCAL_ONLY_SAMPLING_KEYS,
   type Lorebook, type ChatPreset, type AppSettings, type ChatSession, type ChatMessage,
 } from '../sillytavern';
 import { useConversationTreeStore } from '../stores/conversationTree';
@@ -14,6 +15,20 @@ import { logRequest, logResponse, logError, logInfo } from '../stores/requestLog
 
 /** Global macro registry — shared across all components. */
 export const macroRegistry: MacroRegistry = createDefaultRegistry();
+
+/**
+ * Remove sampling parameters that target API providers reject (400).
+ * OpenAI and Anthropic native APIs don't support top_k, min_p, top_a, repetition_penalty.
+ */
+function sanitizeSamplingParams(body: Record<string, any>, apiBaseUrl: string): void {
+  const isOpenAI = apiBaseUrl.includes('api.openai.com');
+  const isAnthropic = apiBaseUrl.includes('api.anthropic.com');
+  if (isOpenAI || isAnthropic) {
+    for (const key of LOCAL_ONLY_SAMPLING_KEYS) {
+      delete body[key];
+    }
+  }
+}
 
 export function useSillytavern() {
   const lorebooks = ref<Lorebook[]>([]);
@@ -156,11 +171,11 @@ export function useSillytavern() {
         variables: { ...currentVariables },
       }));
 
-      // 4. Assemble prompt with lorebooks + preset
+      // 4. Assemble prompt with lorebooks + preset + macro registry
       // 5. Build API request — user's configured model takes priority over preset default
       const activeModel = apiConfig.model || activePreset.settings.openai_model;
 
-      const { messages: promptMessages } = assemblePrompt({
+      const assembleResult = assemblePrompt({
         userInput: content,
         history: treeMessages,
         preset: activePreset,
@@ -172,16 +187,33 @@ export function useSillytavern() {
         model: activeModel,
         formatPrompt: s.formatPromptTemplate || undefined,
       });
+
       const requestBody: Record<string, any> = {
         model: activeModel,
-        messages: promptMessages,
       };
+
+      // Use serialized prompt (text-based templates) or messages array (OpenAI JSON)
+      if (assembleResult.prompt) {
+        requestBody.prompt = assembleResult.prompt;
+      } else {
+        requestBody.messages = assembleResult.messages;
+      }
+
+      // Stop sequences
+      if (assembleResult.stopSequences.length > 0) {
+        requestBody.stop = assembleResult.stopSequences;
+      }
+
+      // Sampling params from preset (legacy or structured)
       if (activePreset.settings.temp_openai !== undefined) requestBody.temperature = activePreset.settings.temp_openai;
       if (activePreset.settings.openai_max_tokens !== undefined) requestBody.max_tokens = activePreset.settings.openai_max_tokens;
       if (activePreset.settings.top_p_openai !== undefined) requestBody.top_p = activePreset.settings.top_p_openai;
       if (activePreset.settings.freq_pen_openai !== undefined) requestBody.frequency_penalty = activePreset.settings.freq_pen_openai;
       if (activePreset.settings.pres_pen_openai !== undefined) requestBody.presence_penalty = activePreset.settings.pres_pen_openai;
       if (activePreset.settings.stream_openai !== undefined) requestBody.stream = activePreset.settings.stream_openai;
+
+      // Post-clean: remove local-only sampling params that target API rejects
+      sanitizeSamplingParams(requestBody, apiConfig.baseUrl);
 
       // 6. Log the full request
       logRequest(apiEndpoint, requestBody);
@@ -216,8 +248,9 @@ export function useSillytavern() {
       const nextVariables = mergeVariables(currentVariables, extractedVars);
 
       // 7. Add assistant reply to conversation tree
+      const sentContent = assembleResult.prompt || JSON.stringify(assembleResult.messages);
       tree.onNewMessage(reply, 'assistant', {
-        input: Math.ceil(JSON.stringify(promptMessages).length / 3),
+        input: Math.ceil(sentContent.length / 3),
         output: rawReply.length,
       });
 
