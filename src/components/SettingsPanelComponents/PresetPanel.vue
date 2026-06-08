@@ -150,15 +150,29 @@
         </div>
         <button class="btn" @click="addBlock">＋ 新增提示词块</button>
       </div>
+
+      <!-- Tab: 消息收发 -->
+      <div v-if="editTab === 'messaging'" class="tab-content">
+        <div class="param-grid">
+          <div v-for="param in messagingParamsList" :key="param.key" class="field param-field">
+            <label :title="param.help">{{ param.label }}</label>
+            <input v-if="param.type === 'checkbox'" type="checkbox" :checked="(editData.messaging as any)[param.key]"
+              @change="(e: any) => (editData.messaging as any)[param.key] = e.target.checked" />
+            <input v-else :type="param.type || 'number'" v-model.number="(editData.messaging as any)[param.key]"
+              :min="param.min" :max="param.max" :step="param.step" class="text-input param-num" />
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue';
+import { ref, reactive, onMounted } from 'vue';
 import { getPresets, savePreset, deletePreset, getSettings, saveSettings } from '../../sillytavern';
 import { importPreset, exportPreset, createEmptyPreset } from '../../sillytavern/preset-importer';
 import { listBuiltinTemplates } from '../../sillytavern/context-template';
+import { useSillytavern } from '../../composables/useSillytavern';
 import type { ChatPreset, StructuredPreset, PromptBlock } from '../../sillytavern/types';
 
 const presets = ref<(ChatPreset & { _structured?: StructuredPreset })[]>([]);
@@ -166,11 +180,14 @@ const activePresetId = ref<string | null>(null);
 const editingPreset = ref<ChatPreset | null>(null);
 const editTab = ref('basic');
 const importMsg = ref('');
+const { refreshPresets } = useSillytavern();
+
 const contextTemplates = listBuiltinTemplates();
 
 const editTabs = [
   { key: 'basic', label: '基础信息' },
   { key: 'sampling', label: '采样参数' },
+  { key: 'messaging', label: '消息收发' },
   { key: 'blocks', label: '提示词块' },
 ];
 
@@ -183,6 +200,17 @@ const samplingParamsList = [
   { key: 'frequency_penalty', label: '频率惩罚', min: -2, max: 2, step: 0.1, type: 'number' },
   { key: 'presence_penalty', label: '存在惩罚', min: -2, max: 2, step: 0.1, type: 'number' },
   { key: 'repetition_penalty', label: '重复惩罚', min: 1, max: 2, step: 0.05, localOnly: true, type: 'number' },
+];
+
+const messagingParamsList = [
+  { key: 'max_context', label: '上下文长度 (max_context)', type: 'number', min: 1024, max: 2097152, step: 1024, help: '最大上下文 token 数，默认 128000' },
+  { key: 'max_tokens', label: '最大回复长度 (max_tokens)', type: 'number', min: 1, max: 131072, step: 1, help: '单次回复最大 token 数，默认 10000' },
+  { key: 'num_generations', label: '备选回复数', type: 'number', min: 1, max: 8, step: 1, help: '每次生成多个备选回复' },
+  { key: 'stream', label: '流式传输 (stream)', type: 'checkbox', help: '启用 SSE 流式输出' },
+  { key: 'continue_prefill', label: '续写预填充', type: 'checkbox', help: '续写模式下预填充文本' },
+  { key: 'truncate_on_overflow', label: '超出上下文截断', type: 'checkbox', help: '超出上下文长度时自动截断' },
+  { key: 'request_thinking', label: '请求思维链', type: 'checkbox', help: '请求模型输出思维链 (thinking)' },
+  { key: 'reasoning_effort', label: '推理强度', type: 'text', help: '如 low/medium/high，留空表示默认' },
 ];
 
 interface EditableData extends StructuredPreset {
@@ -282,6 +310,7 @@ async function saveEdit() {
   await savePreset(cp);
   editingPreset.value = null;
   await loadPresets();
+  await refreshPresets();
 }
 
 async function deleteThisPreset(id: string) {
@@ -294,6 +323,7 @@ async function deleteThisPreset(id: string) {
     }
   }
   await loadPresets();
+  await refreshPresets();
 }
 
 function createNewPreset() {
@@ -354,10 +384,12 @@ async function handleImportFile(e: Event) {
     } else {
       importMsg.value = '✓ 导入成功';
     }
+    // Use filename (without .json) as preset name
+    const fileName = file.name.replace(/\.json$/i, '');
     // Save immediately as new preset
     const cp: ChatPreset = {
       id: crypto.randomUUID(),
-      name: result.preset.name,
+      name: fileName || result.preset.name,
       description: result.preset.description,
       settings: { _structuredPreset: result.preset },
       createdAt: Date.now(),
@@ -365,6 +397,7 @@ async function handleImportFile(e: Event) {
     };
     await savePreset(cp);
     await loadPresets();
+    await refreshPresets();
     setTimeout(() => { importMsg.value = ''; }, 3000);
   } catch (err: any) {
     importMsg.value = '导入失败: ' + (err.message || String(err));

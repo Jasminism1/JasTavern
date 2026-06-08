@@ -59,6 +59,11 @@ export function useSillytavern() {
     isLoading.value = false;
   };
 
+  /** Call after external components (e.g. PresetPanel) save to Dexie to keep presets in sync. */
+  const refreshPresets = async () => {
+    presets.value = await getPresets();
+  };
+
   const activeChat = computed(() => chats.value.find(c => c.id === activeChatId.value) || null);
 
   const toggleLorebook = async (id: string) => {
@@ -159,11 +164,8 @@ export function useSillytavern() {
       const activeBooks = lorebooks.value.filter(b => activeLorebookIds.value.includes(b.id));
       const currentVariables = ac.variables || {};
 
-      // 2. Add user message to conversation tree
-      tree.onNewMessage(content, 'user');
-
-      // 3. Build ChatMessage history from conversation tree for prompt assembly
-      const treeMessages: ChatMessage[] = tree.activePathMessages.map((node, idx) => ({
+      // 2. Build ChatMessage history from conversation tree BEFORE adding current user message
+      const treeMessages: ChatMessage[] = tree.activePathMessages.map((node) => ({
         id: node.id,
         role: node.type === 'system' ? 'system' : node.type === 'assistant' ? 'assistant' : 'user',
         content: node.content,
@@ -171,9 +173,14 @@ export function useSillytavern() {
         variables: { ...currentVariables },
       }));
 
-      // 4. Assemble prompt with lorebooks + preset + macro registry
-      // 5. Build API request — user's configured model takes priority over preset default
-      const activeModel = apiConfig.model || activePreset.settings.openai_model;
+      // 3. Now add user message to conversation tree (for display; not for prompt history)
+      tree.onNewMessage(content, 'user');
+
+      // 4. Extract structuredPreset from active preset (P1 saved presets embed it in settings)
+      const structuredPreset = activePreset.settings?._structuredPreset || undefined;
+
+      // 5. Assemble prompt with lorebooks + preset + macro registry
+      const activeModel = apiConfig.model || activePreset.settings.openai_model || 'gpt-3.5-turbo';
 
       const assembleResult = assemblePrompt({
         userInput: content,
@@ -186,6 +193,7 @@ export function useSillytavern() {
         macroRegistry,
         model: activeModel,
         formatPrompt: s.formatPromptTemplate || undefined,
+        structuredPreset,
       });
 
       const requestBody: Record<string, any> = {
@@ -204,13 +212,21 @@ export function useSillytavern() {
         requestBody.stop = assembleResult.stopSequences;
       }
 
-      // Sampling params from preset (legacy or structured)
-      if (activePreset.settings.temp_openai !== undefined) requestBody.temperature = activePreset.settings.temp_openai;
-      if (activePreset.settings.openai_max_tokens !== undefined) requestBody.max_tokens = activePreset.settings.openai_max_tokens;
-      if (activePreset.settings.top_p_openai !== undefined) requestBody.top_p = activePreset.settings.top_p_openai;
-      if (activePreset.settings.freq_pen_openai !== undefined) requestBody.frequency_penalty = activePreset.settings.freq_pen_openai;
-      if (activePreset.settings.pres_pen_openai !== undefined) requestBody.presence_penalty = activePreset.settings.pres_pen_openai;
-      if (activePreset.settings.stream_openai !== undefined) requestBody.stream = activePreset.settings.stream_openai;
+      // Sampling params — prefer structuredPreset, fall back to legacy settings
+      if (structuredPreset) {
+        requestBody.temperature = structuredPreset.sampling.temperature;
+        requestBody.top_p = structuredPreset.sampling.top_p;
+        requestBody.max_tokens = structuredPreset.messaging.max_tokens;
+        if (structuredPreset.sampling.stop.length > 0) requestBody.stop = structuredPreset.sampling.stop;
+        if (structuredPreset.messaging.stream !== undefined) requestBody.stream = structuredPreset.messaging.stream;
+      } else {
+        if (activePreset.settings.temp_openai !== undefined) requestBody.temperature = activePreset.settings.temp_openai;
+        if (activePreset.settings.openai_max_tokens !== undefined) requestBody.max_tokens = activePreset.settings.openai_max_tokens;
+        if (activePreset.settings.top_p_openai !== undefined) requestBody.top_p = activePreset.settings.top_p_openai;
+        if (activePreset.settings.freq_pen_openai !== undefined) requestBody.frequency_penalty = activePreset.settings.freq_pen_openai;
+        if (activePreset.settings.pres_pen_openai !== undefined) requestBody.presence_penalty = activePreset.settings.pres_pen_openai;
+        if (activePreset.settings.stream_openai !== undefined) requestBody.stream = activePreset.settings.stream_openai;
+      }
 
       // Post-clean: remove local-only sampling params that target API rejects
       sanitizeSamplingParams(requestBody, apiConfig.baseUrl);
@@ -339,6 +355,7 @@ export function useSillytavern() {
     isSending: computed(() => isSending.value),
     isLoading: computed(() => isLoading.value),
     loadAll,
+    refreshPresets,
     toggleLorebook,
     updateSettings,
     createChat,
