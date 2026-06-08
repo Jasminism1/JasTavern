@@ -13,5 +13,7 @@ export * from './vars-merger';
 export * from './api-router';
 export * from './editor-utils';
 export * from './macros';
+export * from './preset-importer';
+export * from './context-template';
 
 export const VERSION = '3.0.0';

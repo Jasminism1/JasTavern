@@ -132,6 +132,103 @@ export interface ChatPreset {
   updatedAt: number;
 }
 
+// ========== P1: Structured Preset Types ==========
+
+/** Sampling parameters — whitelist-only, type-checked on import. */
+export interface SamplingParams {
+  temperature: number;
+  top_p: number;
+  top_k: number;           // local models / aggregators only
+  min_p: number;           // local models / aggregators only
+  top_a: number;           // local models / aggregators only
+  frequency_penalty: number;
+  presence_penalty: number;
+  repetition_penalty: number; // local models / aggregators only
+  stop: string[];          // stop sequences
+}
+
+/** Message-related parameters. */
+export interface MessagingParams {
+  max_context: number;       // default 128000
+  max_tokens: number;        // default 10000
+  num_generations: number;   // default 1
+  stream: boolean;
+  continue_prefill: boolean;
+  truncate_on_overflow: boolean;
+  request_thinking: boolean;
+  reasoning_effort: string | null;
+}
+
+/** Default sampling params (same order as SamplingParams). */
+export const DEFAULT_SAMPLING_PARAMS: SamplingParams = {
+  temperature: 0.8,
+  top_p: 0.9,
+  top_k: 0,
+  min_p: 0,
+  top_a: 0,
+  frequency_penalty: 0,
+  presence_penalty: 0,
+  repetition_penalty: 1,
+  stop: [],
+};
+
+export const DEFAULT_MESSAGING_PARAMS: MessagingParams = {
+  max_context: 128000,
+  max_tokens: 10000,
+  num_generations: 1,
+  stream: false,
+  continue_prefill: false,
+  truncate_on_overflow: true,
+  request_thinking: false,
+  reasoning_effort: null,
+};
+
+/** Sampling param keys that OpenAI / Anthropic native APIs reject (400). */
+export const LOCAL_ONLY_SAMPLING_KEYS: (keyof SamplingParams)[] = [
+  'top_k', 'min_p', 'top_a', 'repetition_penalty',
+];
+
+/** A single prompt block within a preset. */
+export interface PromptBlock {
+  name: string;
+  identifier: string;        // unique within preset
+  content: string;           // supports {{macros}}
+  enabled: boolean;
+  role: 'system' | 'user' | 'assistant';
+  injection_position: number; // 0=before_char … 7=outlet (same as LorebookEntry.position)
+  injection_depth: number;    // 0-4, relative distance from latest user message
+  order: number;              // sort order within same position
+}
+
+/** Full structured preset — used by the importer and UI. */
+export interface StructuredPreset {
+  name: string;
+  description: string;
+  sampling: SamplingParams;
+  messaging: MessagingParams;
+  promptBlocks: PromptBlock[];
+  contextTemplate?: string;   // template name, e.g. "openai", "chatml", "alpaca"
+  customTemplate?: string;    // inline custom template definition (JSON string)
+}
+
+// ========== Context Template Types ==========
+
+export interface ContextTemplate {
+  name: string;
+  label: string;              // display name in UI
+  systemPrefix: string;
+  systemSuffix: string;
+  userPrefix: string;
+  userSuffix: string;
+  assistantPrefix: string;
+  assistantSuffix: string;
+  defaultStop: string[];      // appended before preset's stop
+  /** Where {{wiBefore}} gets injected */
+  wiBeforeSlot: 'before_system' | 'after_system' | 'before_user';
+  /** Where {{wiAfter}} gets injected */
+  wiAfterSlot: 'after_system' | 'before_user' | 'after_user';
+}
+
 // ========== Settings Types ==========
 
 export interface ApiSettings {
