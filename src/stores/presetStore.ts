@@ -72,26 +72,28 @@ export const usePresetStore = defineStore('preset', () => {
 
   /** Save (create or update) a preset with its structured data. */
   async function save(structured: StructuredPreset, id?: string): Promise<ChatPreset> {
+    // Deep-strip Vue reactive proxies — IndexedDB requires plain objects
+    const plain = JSON.parse(JSON.stringify(structured)) as StructuredPreset;
     const existing = id ? presets.value.find(p => p.id === id) : null;
     const cp: ChatPreset = {
       id: id || crypto.randomUUID(),
-      name: structured.name,
-      description: structured.description,
+      name: plain.name,
+      description: plain.description,
       settings: {
-        _structuredPreset: structured,
-        temp_openai: structured.sampling.temperature,
-        top_p_openai: structured.sampling.top_p,
-        freq_pen_openai: structured.sampling.frequency_penalty,
-        pres_pen_openai: structured.sampling.presence_penalty,
-        openai_max_context: structured.messaging.max_context,
-        openai_max_tokens: structured.messaging.max_tokens,
-        stream_openai: structured.messaging.stream,
-        prompt_order: structured.promptBlocks
-          .filter(b => b.enabled)
-          .map(b => ({ identifier: b.identifier, name: b.name, role: b.role, enabled: true })),
-        prompts: structured.promptBlocks
-          .filter(b => b.enabled)
-          .map(b => ({ identifier: b.identifier, role: b.role, content: b.content })),
+        _structuredPreset: plain,
+        temp_openai: plain.sampling.temperature,
+        top_p_openai: plain.sampling.top_p,
+        freq_pen_openai: plain.sampling.frequency_penalty,
+        pres_pen_openai: plain.sampling.presence_penalty,
+        openai_max_context: plain.messaging.max_context,
+        openai_max_tokens: plain.messaging.max_tokens,
+        stream_openai: plain.messaging.stream,
+        prompt_order: plain.promptBlocks
+          .filter((b: any) => b.enabled)
+          .map((b: any) => ({ identifier: b.identifier, name: b.name, role: b.role, enabled: true })),
+        prompts: plain.promptBlocks
+          .filter((b: any) => b.enabled)
+          .map((b: any) => ({ identifier: b.identifier, role: b.role, content: b.content })),
       },
       createdAt: existing?.createdAt || Date.now(),
       updatedAt: Date.now(),

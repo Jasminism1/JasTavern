@@ -191,7 +191,6 @@ export function useSillytavern() {
         variables: currentVariables,
         macroRegistry,
         model: activeModel,
-        formatPrompt: s.formatPromptTemplate || undefined,
         structuredPreset: structuredPreset || undefined,
       });
 
