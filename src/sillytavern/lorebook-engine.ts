@@ -61,7 +61,10 @@ export class LorebookEngine {
       for (const match of newMatches) {
         if (!allMatched.has(match.entry.id)) {
           allMatched.set(match.entry.id, match);
-          currentText += ' ' + match.entry.content;
+          // P2: only scan content of entries with per-entry recursive=true
+          if (match.entry.recursive) {
+            currentText += ' ' + match.entry.content;
+          }
           hasNewMatches = true;
         }
       }

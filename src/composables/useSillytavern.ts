@@ -11,6 +11,7 @@ import {
 } from '../sillytavern';
 import { useConversationTreeStore } from '../stores/conversationTree';
 import { usePresetStore } from '../stores/presetStore';
+import { useLorebookStore } from '../stores/lorebookStore';
 import { loadApiConfig } from '../stores/apiStorage';
 import { logRequest, logResponse, logError, logInfo } from '../stores/requestLogger';
 
@@ -163,7 +164,18 @@ export function useSillytavern() {
       const presetForAssembly = activePreset || presets.value.find(p => p.id === s.activePresetId) || presets.value[0];
       if (!presetForAssembly) throw new Error('No preset available');
 
-      const activeBooks = lorebooks.value.filter(b => activeLorebookIds.value.includes(b.id));
+      // Collect lorebooks from store: global + activated
+      // P2: reserved — when character system exists, also append character.lorebookId
+      const lorebookStore = useLorebookStore();
+      const lorebooksForAssembly: Lorebook[] = [];
+      if (lorebookStore.globalBook) {
+        lorebooksForAssembly.push(lorebookStore.globalBook);
+      }
+      for (const ab of lorebookStore.activeBooks) {
+        if (ab.id !== lorebookStore.globalId) {
+          lorebooksForAssembly.push(ab);
+        }
+      }
       const currentVariables = ac.variables || {};
 
       // 2. Build ChatMessage history from conversation tree BEFORE adding current user message
@@ -185,7 +197,7 @@ export function useSillytavern() {
         userInput: content,
         history: treeMessages,
         preset: presetForAssembly,
-        lorebooks: activeBooks,
+        lorebooks: lorebooksForAssembly,
         userName: s.userName,
         characterName: s.characterName,
         variables: currentVariables,

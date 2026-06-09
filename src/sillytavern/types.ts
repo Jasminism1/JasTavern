@@ -31,6 +31,8 @@ export interface LorebookEntry {
   matchWholeWords?: boolean;
   excludeRecursion?: boolean;
   preventRecursion?: boolean;
+  /** P2: when true, content of this entry is scanned for further keyword matches (recursive activation). Default false. */
+  recursive?: boolean;
   useGroupScoring?: boolean;
   matchPersonaDescription?: boolean;
   matchCharacterDescription?: boolean;
@@ -252,6 +254,8 @@ export interface AppSettings {
   apiMode: 'single' | 'dual';
   activePresetId: string | null;
   activeLorebookIds: string[];
+  /** P2: global world book id — applies to all characters. Null = none selected. */
+  globalLorebookId: string | null;
   userName: string;
   characterName: string;
   theme: 'dark' | 'light';
@@ -286,6 +290,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   apiMode: 'single',
   activePresetId: null,
   activeLorebookIds: [],
+  globalLorebookId: null,
   userName: '用户',
   characterName: 'AI',
   theme: 'dark',
