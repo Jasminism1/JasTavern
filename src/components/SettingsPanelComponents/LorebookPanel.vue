@@ -88,10 +88,12 @@
           <div class="entry-header">
             <div class="entry-summary">
               <label class="toggle-label">
-                <input type="checkbox" v-model="entry.constant" />
-                <span class="entry-name">恒定</span>
+                <input type="checkbox" :checked="!(entry as any)._disabled" @change="(e: any) => (entry as any)._disabled = !e.target.checked" />
               </label>
-              <span class="entry-keys">{{ (entry.keys || []).join(', ') || '无关键词' }}</span>
+              <span class="entry-name">{{ (entry as any).name || (entry as any)._name || '条目 ' + (i+1) }}</span>
+              <span class="entry-type-tag" :class="{ constant: entry.constant }">
+                {{ entry.constant ? '恒定' : '触发' }}
+              </span>
               <span class="entry-pos">{{ positionLabel(entry.position) }}{{ entry.position === 'at_depth' ? ' #'+entry.depth : '' }}</span>
             </div>
             <div class="entry-actions">
@@ -103,16 +105,20 @@
           </div>
           <div v-if="(entry as any)._open" class="entry-detail">
             <div class="field">
-              <label>触发关键词（逗号分隔）</label>
+              <label>条目名称</label>
+              <input :value="(entry as any).name || (entry as any)._name || ''" @input="(e: any) => (entry as any)._name = e.target.value" class="text-input" />
+            </div>
+            <div class="field">
+              <label>关键词（逗号分隔）</label>
               <input :value="(entry.keys || []).join(', ')" @input="(e: any) => entry.keys = e.target.value.split(',').map((s: string) => s.trim()).filter(Boolean)" class="text-input" placeholder="如: 背景故事, 角色经历" />
             </div>
             <div class="field">
-              <label>内容（支持 &#123;&#123;user&#125;&#125;, &#123;&#123;char&#125;&#125; 等宏）</label>
+              <label>内容（支持 {{user}}, {{char}} 等宏）</label>
               <textarea v-model="entry.content" class="text-input mono" rows="5" />
             </div>
             <div class="param-row">
               <div class="field" style="flex:1">
-                <label>位置 (position)</label>
+                <label>位置</label>
                 <select v-model="entry.position" class="text-input">
                   <option value="before_char">before_char</option>
                   <option value="after_char">after_char</option>
@@ -130,10 +136,16 @@
                 <input v-model.number="entry.weight" type="number" min="0" max="9999" class="text-input" />
               </div>
             </div>
-            <label class="toggle-label">
-              <input type="checkbox" v-model="entry.recursive" />
-              <span>允许此条目内容参与递归扫描</span>
-            </label>
+            <div class="inline-checks">
+              <label class="toggle-label">
+                <input type="checkbox" v-model="entry.constant" />
+                <span>恒定条目（始终注入）</span>
+              </label>
+              <label class="toggle-label">
+                <input type="checkbox" v-model="entry.recursive" />
+                <span>递归扫描</span>
+              </label>
+            </div>
           </div>
         </div>
       </div>
@@ -177,6 +189,8 @@ function openBookForEdit(b: Lorebook) {
   plain.scanDepth = (plain as any).scanDepth ?? 2;
   for (const e of (plain.entries || [])) {
     (e as any)._open = false;
+    (e as any)._name = e.comment || '';
+    (e as any)._disabled = !e.enabled && e.enabled !== undefined ? true : false;
   }
   Object.assign(editBook, plain);
   editTab.value = 'entries';
@@ -192,7 +206,25 @@ async function saveBook() {
     id: editBook.id,
     name: editBook.name,
     description: editBook.description,
-    entries: editBook.entries.map(({ _open, ...e }: any) => ({ ...e })),
+    entries: editBook.entries.map((e: any) => ({
+      id: e.id,
+      keys: e.keys || [],
+      secondaryKeys: e.secondaryKeys || [],
+      content: e.content || '',
+      comment: e._name || e.comment || '',
+      enabled: e.enabled ?? !e._disabled,
+      order: e.order ?? 0,
+      position: e.position || 'after_char',
+      depth: e.depth ?? 0,
+      constant: e.constant ?? false,
+      selective: e.selective ?? false,
+      selectiveLogic: e.selectiveLogic || 'and_any',
+      probability: e.probability ?? 100,
+      useProbability: e.useProbability ?? false,
+      addMemo: e.addMemo ?? false,
+      recursive: e.recursive ?? false,
+      weight: e.weight ?? 100,
+    })),
     recursiveScanning: editBook.recursiveScanning,
     caseSensitive: editBook.caseSensitive,
     matchWholeWords: editBook.matchWholeWords,
@@ -297,11 +329,13 @@ h4 { margin: 0; font-size: 14px; color: #aac; }
 .entry-card { background: rgba(18,18,31,0.5); border: 1px solid #2a2a3e; border-radius: 6px; padding: 8px 10px; }
 .entry-header { display: flex; justify-content: space-between; align-items: center; }
 .entry-summary { display: flex; align-items: center; gap: 10px; flex:1; min-width:0; }
-.entry-name { font-size: 12px; color: #ccc; }
-.entry-keys { font-size: 11px; color: #889; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.entry-name { font-size: 12px; color: #ccc; white-space: nowrap; }
+.entry-type-tag { font-size: 9px; padding: 1px 6px; border-radius: 3px; white-space: nowrap; background: #2a3a2a; color: #8a8; }
+.entry-type-tag.constant { background: #3a2a3a; color: #a8a; }
 .entry-pos { font-size: 10px; color: #556; white-space: nowrap; }
 .entry-actions { display: flex; gap: 4px; flex-shrink: 0; }
 .entry-detail { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
 
 .param-row { display: flex; gap: 8px; }
+.inline-checks { display: flex; gap: 16px; flex-wrap: wrap; }
 </style>

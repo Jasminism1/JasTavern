@@ -28,6 +28,7 @@ export function createEmptyEntry(): LorebookEntry {
     keys: [],
     secondaryKeys: [],
     content: '',
+    comment: '',
     order: 100,
     position: 'after_char',
     selective: false,
@@ -36,6 +37,7 @@ export function createEmptyEntry(): LorebookEntry {
     probability: 100,
     addMemo: false,
     recursive: false,
+    enabled: true,
   };
 }
 
@@ -180,37 +182,51 @@ export const useLorebookStore = defineStore('lorebook', () => {
   // ---- Import / Export ----
   async function importFromJson(jsonText: string, fileName?: string): Promise<Lorebook> {
     const data = JSON.parse(jsonText);
-    // Accept {name, entries, ...} or SillyTavern world info format
     const name = fileName?.replace(/\.json$/i, '') || data.name || '导入世界书';
+
+    // Normalize entries: community format uses {uid: {...}}, our format uses [...]
+    let rawEntries: any[] = [];
+    if (Array.isArray(data.entries)) {
+      rawEntries = data.entries;
+    } else if (data.entries && typeof data.entries === 'object') {
+      // Community ST format: entries is an object keyed by uid
+      rawEntries = Object.values(data.entries);
+    }
+
+    const parsedEntries = rawEntries
+      .filter((e: any) => !e.disable && !e.excluded)
+      .map((e: any, i: number) => ({
+        id: e.id || e.uid?.toString() || crypto.randomUUID(),
+        keys: Array.isArray(e.keys) ? e.keys : (Array.isArray(e.key) ? e.key : []),
+        secondaryKeys: Array.isArray(e.secondaryKeys) ? e.secondaryKeys : (Array.isArray(e.keysecondary) ? e.keysecondary : []),
+        content: e.content || '',
+        comment: e.comment || '',
+        order: e.order ?? i * 10,
+        position: typeof e.position === 'number'
+          ? (['before_char','after_char','before_example','after_example','at_depth','example_msg_top','example_msg_bottom','outlet'][e.position] || 'after_char')
+          : (e.position || 'after_char'),
+        depth: e.depth ?? 0,
+        selective: e.selective ?? false,
+        selectiveLogic: typeof e.selectiveLogic === 'number'
+          ? (['and_any','not_all','not_any','and_all'][e.selectiveLogic] || 'and_any')
+          : (e.selectiveLogic || 'and_any'),
+        constant: e.constant ?? false,
+        enabled: e.enabled ?? (e.disable ? false : true),
+        probability: e.useProbability ? (e.probability ?? 100) : 100,
+        useProbability: e.useProbability ?? false,
+        addMemo: e.addMemo ?? false,
+        weight: e.weight ?? 100,
+        recursive: e.recursive ?? false,
+      }));
+
     const book: Lorebook = {
       id: crypto.randomUUID(),
       name,
       description: data.description || '',
-      entries: Array.isArray(data.entries)
-        ? data.entries.map((e: any, i: number) => ({
-            id: e.id || e.uid?.toString() || crypto.randomUUID(),
-            keys: Array.isArray(e.keys) ? e.keys : (Array.isArray(e.key) ? e.key : []),
-            secondaryKeys: Array.isArray(e.secondaryKeys) ? e.secondaryKeys : (Array.isArray(e.keysecondary) ? e.keysecondary : []),
-            content: e.content || '',
-            comment: e.comment || '',
-            order: e.order ?? i * 10,
-            position: typeof e.position === 'number'
-              ? (['before_char','after_char','before_example','after_example','at_depth','example_msg_top','example_msg_bottom','outlet'][e.position] || 'after_char')
-              : (e.position || 'after_char'),
-            selective: e.selective ?? false,
-            selectiveLogic: e.selectiveLogic || 'and_any',
-            constant: e.constant ?? false,
-            probability: e.probability ?? 100,
-            useProbability: e.useProbability ?? false,
-            addMemo: e.addMemo ?? false,
-            depth: e.depth,
-            weight: e.weight ?? 100,
-            recursive: e.recursive ?? false,
-          }))
-        : [],
-      recursiveScanning: data.recursiveScanning ?? false,
-      caseSensitive: data.caseSensitive ?? false,
-      matchWholeWords: data.matchWholeWords ?? false,
+      entries: parsedEntries,
+      recursiveScanning: data.recursiveScanning ?? data.recursive_scanning ?? false,
+      caseSensitive: data.caseSensitive ?? data.case_sensitive ?? false,
+      matchWholeWords: data.matchWholeWords ?? data.match_whole_words ?? false,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };

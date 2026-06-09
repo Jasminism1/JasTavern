@@ -10,6 +10,8 @@ export interface LorebookEntry {
   secondaryKeys: string[];
   content: string;
   comment?: string;
+  /** P2: whether this entry is active. false = disabled (won't be injected). Default true. */
+  enabled: boolean;
   order: number;
   /** SillyTavern position: 0=before_char, 1=after_char, 2=before_example(AN top), 3=after_example(AN bottom), 4=at_depth, 5=example_msg_top, 6=example_msg_bottom, 7=outlet */
   position: 'before_char' | 'after_char' | 'before_example' | 'after_example' | 'at_depth' | 'example_msg_top' | 'example_msg_bottom' | 'outlet';
