@@ -207,34 +207,62 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
   depthItems.sort((a, b) => a.depth - b.depth || a.order - b.order);
 
   // Build interleaved message list
+  // Safety: clamp all depth values to [0, hLen] to prevent out-of-range insertion
   const interleavedMessages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [];
   const hLen = recentHistory.length;
+  const clampedDepthItems = depthItems.map(d => ({
+    ...d,
+    depth: Math.max(0, Math.min(d.depth, hLen)),
+  }));
 
-  // Walk history from oldest to newest, inserting depth items at the right points
-  // depth=0: after last history message (before user input)
-  // depth=1: between second-to-last and last message
-  // depth=N: after position (hLen - N) from start
+  // Group depth items by their (clamped) depth
+  const depthGroups = new Map<number, typeof clampedDepthItems>();
+  for (const d of clampedDepthItems) {
+    const depth = d.depth;
+    if (!depthGroups.has(depth)) depthGroups.set(depth, []);
+    depthGroups.get(depth)!.push(d);
+  }
+
+  // Walk history from oldest to newest
+  // depth=N means insert after the Nth message from the END
+  //   N=0: after last history message (right before user input)
+  //   N=hLen: before first history message
   for (let i = 0; i < hLen; i++) {
-    // Items at this depth: depth = hLen - i (distance from end)
-    const itemsHere = depthItems.filter(d => d.depth === (hLen - i));
-    // Also items at depth >= hLen go before everything
+    const depth = hLen - i; // distance from end
+
     if (i === 0) {
-      const preItems = depthItems.filter(d => d.depth >= hLen);
-      for (const item of preItems) {
+      // Items at depth >= hLen go before first history message
+      const deep = depthGroups.get(hLen) || [];
+      for (const item of deep) {
         interleavedMessages.push({ role: item.role, content: item.content });
       }
     }
-    // Items at exactly this depth
-    for (const item of itemsHere) {
+
+    // Items at exact depth
+    const items = depthGroups.get(depth) || [];
+    for (const item of items) {
       interleavedMessages.push({ role: item.role, content: item.content });
     }
+
+    // History message
     interleavedMessages.push(recentHistory[i]);
   }
 
-  // Items at depth 0 (after last message, before user input)
-  const depth0Items = depthItems.filter(d => d.depth === 0);
-  for (const item of depth0Items) {
-    interleavedMessages.push({ role: item.role, content: item.content });
+  // Handle hLen=0 edge case: inject ALL depth items (clamped to 0) before user input
+  if (hLen === 0) {
+    const allItems = depthGroups.get(0) || [];
+    for (const item of allItems) {
+      interleavedMessages.push({ role: item.role, content: item.content });
+    }
+  }
+
+  // Items at depth 0 (closest to user input)
+  const zeroItems = depthGroups.get(0) || [];
+  // Only add if hLen > 0 (they were already added above in the hLen=0 branch)
+  if (hLen > 0) {
+    for (const item of zeroItems) {
+      interleavedMessages.push({ role: item.role, content: item.content });
+    }
   }
 
   // ---- 8. Assemble final messages ----

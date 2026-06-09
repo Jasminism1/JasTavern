@@ -20,6 +20,9 @@ export class LorebookEngine {
     const matched: MatchedEntry[] = [];
 
     for (const entry of this.lorebook.entries) {
+      // Disabled entries are never injected, regardless of constant/trigger status
+      if (entry.enabled === false) continue;
+
       if (entry.constant) {
         matched.push({ entry, score: -9999, matchedKeywords: ['constant'] });
         continue;

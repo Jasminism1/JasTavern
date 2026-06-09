@@ -88,9 +88,9 @@
           <div class="entry-header">
             <div class="entry-summary">
               <label class="toggle-label">
-                <input type="checkbox" :checked="!(entry as any)._disabled" @change="(e: any) => (entry as any)._disabled = !e.target.checked" />
+                <input type="checkbox" v-model="entry.enabled" />
               </label>
-              <span class="entry-name">{{ (entry as any).name || (entry as any)._name || '条目 ' + (i+1) }}</span>
+              <span class="entry-name">{{ entry.comment || '条目 ' + (i+1) }}</span>
               <span class="entry-type-tag" :class="{ constant: entry.constant }">
                 {{ entry.constant ? '恒定' : '触发' }}
               </span>
@@ -106,7 +106,7 @@
           <div v-if="(entry as any)._open" class="entry-detail">
             <div class="field">
               <label>条目名称</label>
-              <input :value="(entry as any).name || (entry as any)._name || ''" @input="(e: any) => (entry as any)._name = e.target.value" class="text-input" />
+              <input v-model="entry.comment" class="text-input" />
             </div>
             <div class="field">
               <label>关键词（逗号分隔）</label>
@@ -189,8 +189,6 @@ function openBookForEdit(b: Lorebook) {
   plain.scanDepth = (plain as any).scanDepth ?? 2;
   for (const e of (plain.entries || [])) {
     (e as any)._open = false;
-    (e as any)._name = e.comment || '';
-    (e as any)._disabled = !e.enabled && e.enabled !== undefined ? true : false;
   }
   Object.assign(editBook, plain);
   editTab.value = 'entries';
@@ -212,8 +210,8 @@ async function saveBook() {
       keys: e.keys || [],
       secondaryKeys: e.secondaryKeys || [],
       content: e.content || '',
-      comment: e._name || e.comment || '',
-      enabled: e._disabled ? false : (e.enabled ?? true),
+      comment: e.comment || '',
+      enabled: e.enabled ?? true,
       order: e.order ?? 0,
       position: e.position || 'after_char',
       depth: e.depth ?? 0,
