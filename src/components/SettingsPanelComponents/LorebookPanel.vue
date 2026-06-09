@@ -202,7 +202,8 @@ function closeEdit() {
 }
 
 async function saveBook() {
-  const saved: Lorebook = {
+  // Deep-clone to strip Vue reactive proxies before IndexedDB write
+  const saved = JSON.parse(JSON.stringify({
     id: editBook.id,
     name: editBook.name,
     description: editBook.description,
@@ -212,7 +213,7 @@ async function saveBook() {
       secondaryKeys: e.secondaryKeys || [],
       content: e.content || '',
       comment: e._name || e.comment || '',
-      enabled: e.enabled ?? !e._disabled,
+      enabled: e._disabled ? false : (e.enabled ?? true),
       order: e.order ?? 0,
       position: e.position || 'after_char',
       depth: e.depth ?? 0,
@@ -230,8 +231,9 @@ async function saveBook() {
     matchWholeWords: editBook.matchWholeWords,
     createdAt: editBook.createdAt,
     updatedAt: Date.now(),
-    scanDepth: editBook.scanDepth || (editBook as any).scanDepth || 2,
-  };
+    scanDepth: (editBook as any).scanDepth || 2,
+  })) as Lorebook;
+
   await store.save(saved);
   editingId.value = null;
 }
