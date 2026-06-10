@@ -190,27 +190,43 @@ export function importPreset(data: unknown): ImportResult {
   const messaging = parseMessagingParams(messagingRaw);
 
   // Prompt blocks — use prompt_order as canonical order + enabled, prompts for content
-  // Community ST presets: "prompt_order" defines the SEQUENCE and enabled status.
+  // Community ST presets:
+  //   prompt_order is [{character_id: 100000, order: [...]}, {character_id: 100001, order: [...]}, ...]
+  //   Each "order" array contains {identifier, enabled} items in SEQUENCE.
   //   "prompts" stores content. prompt_order overrides prompts.enabled.
   //   If no prompt_order, fall back to prompts directly.
-  const promptOrder = Array.isArray(obj.prompt_order) ? obj.prompt_order as Array<Record<string, unknown>> : null;
+  const promptOrderRaw = Array.isArray(obj.prompt_order) ? obj.prompt_order as Array<Record<string, unknown>> : null;
   const promptsRaw = Array.isArray(obj.prompts) ? obj.prompts as Array<Record<string, unknown>> : null;
   const promptBlocksRaw = Array.isArray(obj.promptBlocks) ? obj.promptBlocks : null;
 
   let promptBlocks: PromptBlock[];
 
-  if (promptOrder && promptsRaw) {
-    // Community ST format: walk prompt_order, look up content in prompts
-    promptBlocks = promptOrder.map((poItem, i) => {
-      const id = asString(poItem.identifier, '');
-      const match = promptsRaw.find((p: any) => p?.identifier === id) || ({} as Record<string, unknown>);
-      const isEnabled = poItem.enabled !== undefined ? asBoolean(poItem.enabled, true) : asBoolean(match.enabled, true);
+  // Flatten nested prompt_order structure: [{character_id, order: [...]}, ...] → flat {identifier, enabled}[]
+  const flatOrderItems: Array<{ identifier: string; enabled: boolean }> = [];
+  if (promptOrderRaw) {
+    for (const entry of promptOrderRaw) {
+      const orderArr = entry.order;
+      if (Array.isArray(orderArr)) {
+        for (const item of orderArr as Array<Record<string, unknown>>) {
+          flatOrderItems.push({
+            identifier: asString(item.identifier, ''),
+            enabled: asBoolean(item.enabled, true),
+          });
+        }
+      }
+    }
+  }
+
+  if (flatOrderItems.length > 0 && promptsRaw) {
+    // Community ST format: walk flattened prompt_order, look up content in prompts
+    promptBlocks = flatOrderItems.map((poItem, i) => {
+      const match = promptsRaw.find((p: any) => p?.identifier === poItem.identifier) || ({} as Record<string, unknown>);
       const block: PromptBlock = {
-        name: asString(match.name || poItem.name, id || `块${i + 1}`),
-        identifier: id,
+        name: asString(match.name, poItem.identifier || `块${i + 1}`),
+        identifier: poItem.identifier,
         content: asString(match.content, ''),
-        enabled: isEnabled,
-        role: asRole(match.role || poItem.role),
+        enabled: poItem.enabled,
+        role: asRole(match.role),
         injection_position: asNumber(match.injection_position ?? match.position, 0),
         injection_depth: asNumber(match.injection_depth ?? match.depth, 4),
         order: i,

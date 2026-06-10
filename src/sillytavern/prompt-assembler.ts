@@ -309,13 +309,14 @@ function resolveBlockContent(
     content?: string;
   }>;
   const custom = prompts.find(p => p.identifier === block.identifier);
-  if (custom?.content !== undefined) return custom.content;
+  // Only use custom content if non-empty — else fall through to direct settings
+  if (custom?.content) return custom.content;
 
-  // Fallback: direct settings lookup
+  // For built-in identifiers (main, nsfw, jailbreak, etc.) → preset.settings[identifier]
   const direct = preset.settings[block.identifier];
   if (typeof direct === 'string' && direct.trim()) return direct;
 
-  // If block has its own content (from structuredPreset)
+  // If block has its own content (from structuredPreset importer)
   if (block.content && block.content.trim()) return block.content;
 
   return null;
