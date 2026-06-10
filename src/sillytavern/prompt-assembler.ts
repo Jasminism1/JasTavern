@@ -104,16 +104,14 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
 
   // ---- 6. SillyTavern role alternation algorithm ----
   // Walk blocks from top to bottom.
+  //
   // First entry decides initial role:
-  //   system → it IS the system message. Continue scanning.
-  //   user / assistant → prepend empty system "\n", then start with that role.
-  // After system is set:
-  //   same role → append
-  //   system role → CONVERT to user (system is already consumed)
-  //   new unseen role → start new message
-  //   already-seen role → merge into current
+  //   system → it IS the system message. Then strictly alternate user↔assistant.
+  //   user/assistant → prepend empty system "\n", start with that role, then alternate.
+  //
+  // After system: same role → append. Different role → always start new message.
+  //   system AFTER first → CONVERT to user (system already consumed).
   const messages: { role: OutputRole; content: string }[] = [];
-  const usedRoles = new Set<OutputRole>();
   let curRole: OutputRole | null = null;
   let curContent = '';
   let hasChatHistory = false;
@@ -122,17 +120,19 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
   for (const block of promptBlocks) {
     if (block.identifier === 'chatHistory') {
       hasChatHistory = true;
-      if (curContent.trim()) {
-        messages.push({ role: curRole!, content: curContent.trim() });
-        curContent = '';
+      // Save current message BEFORE injecting history
+      const savedRole = curRole;
+      const savedContent = curContent;
+      if (savedContent.trim() && savedRole) {
+        messages.push({ role: savedRole, content: savedContent.trim() });
       }
+      curContent = '';
+      // Inject history messages
       for (const h of recentHistory) {
         emitMessage(messages, { role: h.role, content: h.content });
       }
-      if (messages.length > 0) {
-        curRole = messages[messages.length - 1].role;
-        usedRoles.add(curRole);
-      }
+      // Restore role so subsequent prompt blocks continue where they left off
+      curRole = savedRole;
       isFirstBlock = false;
       continue;
     }
@@ -146,55 +146,39 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
     const resolved = replaceMacros(rawContent, macroCtx, macroRegistry);
     if (!resolved.trim()) continue;
 
-    const role = block.role;
+    let effectiveRole: OutputRole = block.role;
+
+    // System AFTER first message → CONVERT to user
+    if (!isFirstBlock && effectiveRole === 'system') {
+      effectiveRole = 'user';
+    }
 
     if (isFirstBlock) {
-      // --- First enabled entry: determines the start ---
+      // --- First enabled entry ---
       isFirstBlock = false;
-      if (role === 'system') {
-        // First entry IS the system message
+      if (effectiveRole === 'system') {
         curRole = 'system';
         curContent = resolved;
-        usedRoles.add('system');
       } else {
-        // First entry is user or assistant → prepend empty system "\n"
+        // First is user/assistant → prepend empty system
         messages.push({ role: 'system', content: '\n' });
-        usedRoles.add('system');
-        curRole = role;
+        curRole = effectiveRole;
         curContent = resolved;
-        usedRoles.add(role);
       }
       continue;
     }
 
-    // --- Subsequent entries ---
-    if (role === 'system') {
-      // System AFTER first message → CONVERT to user
-      usedRoles.add('user'); // mark user as used so subsequent genuine user entries merge
-      if (curRole === 'user') {
-        curContent += '\n\n' + resolved;
-      } else {
-        // Currently on assistant → push it, start a user message
-        if (curContent.trim()) {
-          messages.push({ role: curRole, content: curContent.trim() });
-        }
-        curRole = 'user';
-        curContent = resolved;
-      }
-    } else if (role === curRole) {
+    // --- Subsequent entries: strict alternation ---
+    if (effectiveRole === curRole) {
       // Same role → append
       curContent += '\n\n' + resolved;
-    } else if (!usedRoles.has(role)) {
-      // New unseen role → push current, start new
-      if (curContent.trim()) {
-        messages.push({ role: curRole, content: curContent.trim() });
-      }
-      curRole = role;
-      curContent = resolved;
-      usedRoles.add(role);
     } else {
-      // Role already used → merge into current
-      curContent += '\n\n' + resolved;
+      // Different role → push current, start new
+      if (curContent.trim()) {
+        messages.push({ role: curRole!, content: curContent.trim() });
+      }
+      curRole = effectiveRole;
+      curContent = resolved;
     }
   }
 
