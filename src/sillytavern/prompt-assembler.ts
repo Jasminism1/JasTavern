@@ -1,10 +1,17 @@
 /**
- * Prompt Assembler
+ * Prompt Assembler — SillyTavern-compatible message builder.
+ *
+ * Core algorithm: walk prompt_order in sequence, resolve each block's content,
+ * group consecutive same-role blocks into one message.
+ *
+ * Structure guarantee:
+ *   [system] (if any system blocks exist)
+ *   [user] [assistant] [user] [assistant] ... (alternating, no consecutive same-role)
+ *   [user] (final user input)
  */
 
 import type { ChatPreset, Lorebook, ChatMessage, MatchedEntry, PromptBlock, StructuredPreset, ContextTemplate } from './types';
 import { createLorebookEngine } from './lorebook-engine';
-import { formatVariablesForPrompt } from './variables';
 import { MacroRegistry, type MacroContext } from './macros';
 import { serializeContext } from './context-template';
 import { getBuiltinTemplate } from './context-template';
@@ -19,28 +26,25 @@ export interface AssembleOptions {
   variables?: Record<string, string | number>;
   extraVariables?: Record<string, any>;
   formatPrompt?: string;
-  /** Optional macro registry for {{user}}, {{char}}, etc. */
   macroRegistry?: MacroRegistry;
-  /** Current model name for {{model}} macro */
   model?: string;
-  /** P1: structured preset with promptBlocks — if provided, overrides prompt_order */
   structuredPreset?: StructuredPreset;
-  /** P1: context template name — "openai" (default), "chatml", "alpaca", "llama3" */
   contextTemplateName?: string;
 }
 
 export interface AssembleResult {
   messages: { role: 'system' | 'user' | 'assistant'; content: string }[];
-  /** For text-based templates — single concatenated prompt string */
   prompt?: string;
   matchedEntries: MatchedEntry[];
   systemPrompt: string;
-  /** Merged stop sequences (from template + preset) */
   stopSequences: string[];
 }
 
+/** Output role — maps system/user/assistant for message grouping. */
+type OutputRole = 'system' | 'user' | 'assistant';
+
 export function assemblePrompt(options: AssembleOptions): AssembleResult {
-  const { userInput, history, preset, lorebooks, userName, characterName, variables, extraVariables, formatPrompt, macroRegistry, model, structuredPreset, contextTemplateName } = options;
+  const { userInput, history, preset, lorebooks, userName, characterName, variables, macroRegistry, model, structuredPreset, contextTemplateName } = options;
 
   // ---- 1. Lorebook matching ----
   const allMatchedEntries: MatchedEntry[] = [];
@@ -62,7 +66,7 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
     || 128000;
   let currentTokens = 0;
 
-  // ---- 3. Resolve Context Template ----
+  // ---- 3. Context template ----
   let contextTemplate: ContextTemplate | undefined;
   const tplName = contextTemplateName || structuredPreset?.contextTemplate || 'openai';
   if (tplName !== 'openai') {
@@ -70,250 +74,104 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
   }
 
   // ---- 4. Build macro context ----
-  // Step A: collect raw history first (cannot resolve macros yet — macroCtx not built)
-  const rawHistory: { role: 'system' | 'user' | 'assistant'; content: string }[] = [];
+  const rawHistory: { role: OutputRole; content: string }[] = [];
   for (let i = history.length - 1; i >= 0; i--) {
     const msg = history[i];
     if (msg.role === 'system') continue;
     const msgTokens = msg.content.length / 4;
     if (currentTokens + msgTokens > maxContextTokens * 0.8) break;
-    rawHistory.unshift({ role: msg.role, content: msg.content });
+    rawHistory.unshift({ role: msg.role as OutputRole, content: msg.content });
     currentTokens += msgTokens;
   }
 
-  // Step B: build macroCtx from raw history
   const macroCtx: MacroContext = buildMacroContext({
     userName, characterName, userInput, variables, model,
     preset, structuredPreset, recentHistory: rawHistory, macroRegistry,
   });
 
-  // Step C: now re-resolve history messages with macroCtx
   const recentHistory = rawHistory.map(h => ({
     ...h,
     content: replaceMacros(h.content, macroCtx, macroRegistry),
   }));
 
-  // ---- 5. Collect injectable blocks ----
-  // promptBlocks from structured preset (if available), or from legacy preset.settings.prompts
-  const hasPromptBlocks = !!(structuredPreset?.promptBlocks && structuredPreset.promptBlocks.length > 0);
-  const promptBlocks: PromptBlock[] = hasPromptBlocks
-    ? structuredPreset!.promptBlocks.filter(b => b.enabled)
-    : buildLegacyPromptBlocks(preset);
+  // ---- 5. Collect prompt blocks sorted by order ----
+  const promptBlocks: PromptBlock[] = (structuredPreset?.promptBlocks?.length
+    ? structuredPreset.promptBlocks.filter(b => b.enabled)
+    : buildLegacyPromptBlocks(preset)
+  ).sort((a, b) => a.order - b.order);
 
-  // Separate system-level blocks (before_char, after_char, before_example, after_example)
-  // from depth-based blocks (at_depth)
-  const systemBlocks = promptBlocks.filter(
-    b => b.injection_position !== 4 // 4 = at_depth
-  );
-  const depthBlocks = promptBlocks.filter(
-    b => b.injection_position === 4 // at_depth
-  );
+  // ---- 6. Walk prompt blocks, resolve content, group by role ----
+  const assembledMessages: { role: OutputRole; content: string }[] = [];
+  let hasChatHistory = false;
 
-  // ---- 6. Build system accumulator from system blocks + lorebook entries ----
-  let systemAccumulator = '';
-
-  // Group by position
-  const positionGroups = new Map<number, string[]>();
-  for (const b of systemBlocks) {
-    const pos = b.injection_position;
-    if (!positionGroups.has(pos)) positionGroups.set(pos, []);
-    positionGroups.get(pos)!.push(replaceMacros(b.content, macroCtx, macroRegistry));
-  }
-
-  // Lorebook entries → worldInfoBefore (position 4=at_depth handled below)
-  const wiBeforeContent = uniqueEntries
-    .filter(e => e.entry.position !== 'at_depth')
-    .map(e => replaceMacros(e.entry.content, macroCtx, macroRegistry))
-    .join('\n\n');
-
-  const wiAfterContent = uniqueEntries
-    .filter(e => e.entry.position === 'at_depth')
-    .map(e => replaceMacros(e.entry.content, macroCtx, macroRegistry))
-    .join('\n\n');
-
-  // Build system prompt skeleton following position order
-  // 0=before_char: character description, personality, scenario go here
-  const charBlocks = positionGroups.get(0) || []; // before_char
-  if (characterName) {
-    systemAccumulator += charBlocks.join('\n\n');
-  }
-  if (wiBeforeContent) {
-    systemAccumulator += (systemAccumulator ? '\n\n' : '') + wiBeforeContent;
-  }
-
-  // 1=after_char: after character info (default for most prompt blocks)
-  const afterCharBlocks = positionGroups.get(1) || [];
-  systemAccumulator += (systemAccumulator ? '\n\n' : '') + afterCharBlocks.join('\n\n');
-
-  // 2,3 = before/after example
-  const exampleBlocks = [
-    ...(positionGroups.get(2) || []),
-    ...(positionGroups.get(3) || []),
-  ];
-  if (exampleBlocks.length > 0) {
-    systemAccumulator += (systemAccumulator ? '\n\n' : '') + exampleBlocks.join('\n\n');
-  }
-
-  // 5,6,7 = example_msg_top, example_msg_bottom, outlet
-  const extraBlocks = [
-    ...(positionGroups.get(5) || []),
-    ...(positionGroups.get(6) || []),
-    ...(positionGroups.get(7) || []),
-  ];
-  if (extraBlocks.length > 0) {
-    systemAccumulator += (systemAccumulator ? '\n\n' : '') + extraBlocks.join('\n\n');
-  }
-
-  // Add variables + format prompt
-  const variablesBlock = formatVariablesForPrompt(variables || {});
-  if (variablesBlock) {
-    systemAccumulator += (systemAccumulator ? '\n\n' : '') + replaceMacros(variablesBlock, macroCtx, macroRegistry);
-  }
-  if (formatPrompt) {
-    systemAccumulator += (systemAccumulator ? '\n\n' : '') + replaceMacros(formatPrompt, macroCtx, macroRegistry);
-  }
-
-  // ---- 7. Depth-based interleaving into history ----
-  // Collect all at_depth items (prompt blocks + lorebook entries with depth)
-  interface DepthItem {
-    content: string;
-    role: 'system' | 'user' | 'assistant';
-    depth: number;
-    order: number;
-  }
-
-  const depthItems: DepthItem[] = [];
-
-  for (const b of depthBlocks) {
-    depthItems.push({
-      content: replaceMacros(b.content, macroCtx, macroRegistry),
-      role: b.role,
-      depth: b.injection_depth,
-      order: b.order,
-    });
-  }
-
-  // Lorebook entries with position=at_depth
-  for (const e of uniqueEntries.filter(e => e.entry.position === 'at_depth')) {
-    depthItems.push({
-      content: replaceMacros(e.entry.content, macroCtx, macroRegistry),
-      role: 'system',
-      depth: e.entry.depth ?? 0,
-      order: e.entry.order,
-    });
-  }
-
-  // Sort depth items: shallower depth = closer to user input
-  depthItems.sort((a, b) => a.depth - b.depth || a.order - b.order);
-
-  // Build interleaved message list
-  // Safety: clamp all depth values to [0, hLen] to prevent out-of-range insertion
-  const interleavedMessages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [];
-  const hLen = recentHistory.length;
-  const clampedDepthItems = depthItems.map(d => ({
-    ...d,
-    depth: Math.max(0, Math.min(d.depth, hLen)),
-  }));
-
-  // Group depth items by their (clamped) depth
-  const depthGroups = new Map<number, typeof clampedDepthItems>();
-  for (const d of clampedDepthItems) {
-    const depth = d.depth;
-    if (!depthGroups.has(depth)) depthGroups.set(depth, []);
-    depthGroups.get(depth)!.push(d);
-  }
-
-  // Walk history from oldest to newest
-  // depth=N means insert after the Nth message from the END
-  //   N=0: after last history message (right before user input)
-  //   N=hLen: before first history message
-  for (let i = 0; i < hLen; i++) {
-    const depth = hLen - i; // distance from end
-
-    if (i === 0) {
-      // Items at depth >= hLen go before first history message
-      const deep = depthGroups.get(hLen) || [];
-      for (const item of deep) {
-        interleavedMessages.push({ role: item.role, content: item.content });
+  for (const block of promptBlocks) {
+    // Skip chatHistory blocks — we handle history insertion separately
+    if (block.identifier === 'chatHistory') {
+      hasChatHistory = true;
+      for (const h of recentHistory) {
+        emitMessage(assembledMessages, { role: h.role, content: h.content });
       }
+      continue;
     }
 
-    // Items at exact depth
-    const items = depthGroups.get(depth) || [];
-    for (const item of items) {
-      interleavedMessages.push({ role: item.role, content: item.content });
-    }
+    const rawContent = resolveBlockContent(block, {
+      preset, uniqueEntries, structuredPreset, variables,
+    });
 
-    // History message
-    interleavedMessages.push(recentHistory[i]);
+    if (!rawContent || !rawContent.trim()) continue;
+
+    const resolved = replaceMacros(rawContent, macroCtx, macroRegistry);
+    if (!resolved.trim()) continue;
+
+    emitMessage(assembledMessages, { role: block.role, content: resolved });
   }
 
-  // Handle hLen=0 edge case: inject ALL depth items (clamped to 0) before user input
-  if (hLen === 0) {
-    const allItems = depthGroups.get(0) || [];
-    for (const item of allItems) {
-      interleavedMessages.push({ role: item.role, content: item.content });
-    }
-  }
-
-  // Items at depth 0 (closest to user input)
-  const zeroItems = depthGroups.get(0) || [];
-  // Only add if hLen > 0 (they were already added above in the hLen=0 branch)
-  if (hLen > 0) {
-    for (const item of zeroItems) {
-      interleavedMessages.push({ role: item.role, content: item.content });
+  // If chatHistory wasn't inserted, append it now
+  if (!hasChatHistory) {
+    for (const h of recentHistory) {
+      emitMessage(assembledMessages, { role: h.role, content: h.content });
     }
   }
 
-  // ---- 8. Assemble final messages ----
-  const assembledMessages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [];
+  // ---- 7. Finalize: ensure system at top, no consecutive same-role ----
+  const finalized = normalizeMessages(assembledMessages);
 
-  if (systemAccumulator.trim()) {
-    assembledMessages.push({ role: 'system', content: systemAccumulator });
-  }
-  assembledMessages.push(...interleavedMessages);
-
+  // Append user input as final message
   const resolvedUserInput = replaceMacros(userInput, macroCtx, macroRegistry);
-  assembledMessages.push({ role: 'user', content: resolvedUserInput });
+  emitMessage(finalized, { role: 'user', content: resolvedUserInput });
 
-  // WiAfter at_depth entries as trailing system note
-  if (wiAfterContent && contextTemplate?.wiAfterSlot === 'before_user') {
-    // Insert before user input
-    const lastIdx = assembledMessages.length - 1;
-    assembledMessages.splice(lastIdx, 0, { role: 'system', content: wiAfterContent });
-  }
+  const systemPrompt = finalized
+    .filter(m => m.role === 'system')
+    .map(m => m.content)
+    .join('\n\n');
 
-  // ---- 9. Context template serialization ----
-  let finalMessages = assembledMessages;
+  // ---- 8. Context template serialization ----
+  let finalMessages = finalized;
   let finalPrompt: string | undefined;
   let stopSeqs: string[] = [];
 
   if (contextTemplate && contextTemplate.name !== 'openai') {
+    const wiBefore = uniqueEntries.filter(e => e.entry.position !== 'at_depth')
+      .map(e => replaceMacros(e.entry.content, macroCtx, macroRegistry)).join('\n\n');
+    const wiAfter = uniqueEntries.filter(e => e.entry.position === 'at_depth')
+      .map(e => replaceMacros(e.entry.content, macroCtx, macroRegistry)).join('\n\n');
     const result = serializeContext({
-      systemMessages: assembledMessages.filter(m => m.role === 'system'),
-      history: assembledMessages.filter(m => m.role !== 'system' && m.role !== 'user').concat(
-        assembledMessages.filter(m => m.role === 'user').slice(0, -1)
-      ),
+      systemMessages: finalized.filter(m => m.role === 'system'),
+      history: finalized.filter(m => m.role !== 'system' && m.role !== 'user'),
       userInput: resolvedUserInput,
-      wiBefore: wiBeforeContent,
-      wiAfter: wiAfterContent,
+      wiBefore,
+      wiAfter,
       template: contextTemplate,
     });
     if (result.prompt) {
       finalPrompt = result.prompt;
-      finalMessages = []; // text-based templates don't use messages array
+      finalMessages = [];
     }
     stopSeqs = result.stop;
   }
 
-  // Collect stop sequences from template + preset
   const presetStops = structuredPreset?.sampling?.stop || [];
   stopSeqs = [...new Set([...stopSeqs, ...presetStops])];
-
-  const systemPrompt = assembledMessages
-    .filter(m => m.role === 'system')
-    .map(m => m.content)
-    .join('\n\n');
 
   return {
     messages: finalMessages,
@@ -322,6 +180,119 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
     systemPrompt,
     stopSequences: stopSeqs,
   };
+}
+
+// ========== Message emitter ==========
+
+/**
+ * Add a message to the list. If the last message has the same role,
+ * append content to it instead of creating a new message.
+ */
+function emitMessage(
+  list: { role: OutputRole; content: string }[],
+  msg: { role: OutputRole; content: string },
+): void {
+  if (!msg.content.trim()) return;
+  const last = list[list.length - 1];
+  if (last && last.role === msg.role) {
+    last.content += '\n\n' + msg.content;
+  } else {
+    list.push({ role: msg.role, content: msg.content });
+  }
+}
+
+/**
+ * Ensure good structure:
+ * 1. At most one system message, and it's at the top
+ * 2. No consecutive same-role messages
+ * 3. No consecutive duplicate content
+ */
+function normalizeMessages(
+  msgs: { role: OutputRole; content: string }[],
+): { role: OutputRole; content: string }[] {
+  if (msgs.length === 0) return [];
+
+  // Collect all system content into the first system message
+  const result: { role: OutputRole; content: string }[] = [];
+  let sysContent = '';
+
+  for (const m of msgs) {
+    if (m.role === 'system') {
+      sysContent += (sysContent ? '\n\n' : '') + m.content;
+    } else {
+      emitMessage(result, m);
+    }
+  }
+
+  // Prepend system message if any system content exists
+  if (sysContent.trim()) {
+    result.unshift({ role: 'system', content: sysContent });
+  }
+
+  return result;
+}
+
+// ========== Content resolvers ==========
+
+function resolveBlockContent(
+  block: PromptBlock,
+  ctx: {
+    preset: ChatPreset;
+    uniqueEntries: MatchedEntry[];
+    structuredPreset?: StructuredPreset;
+    variables?: Record<string, string | number>;
+  },
+): string | null {
+  const { preset, uniqueEntries } = ctx;
+
+  // Known system identifiers → dynamic content
+  if (block.identifier === 'worldInfoBefore') {
+    return uniqueEntries
+      .filter(e => e.entry.position !== 'at_depth')
+      .map(e => e.entry.content)
+      .join('\n\n');
+  }
+  if (block.identifier === 'worldInfoAfter') {
+    return uniqueEntries
+      .filter(e => e.entry.position === 'at_depth')
+      .map(e => e.entry.content)
+      .join('\n\n');
+  }
+  if (block.identifier === 'charDescription') {
+    return preset.settings.character_description || null;
+  }
+  if (block.identifier === 'charPersonality') {
+    return preset.settings.character_personality || null;
+  }
+  if (block.identifier === 'scenario') {
+    return preset.settings.scenario || null;
+  }
+  if (block.identifier === 'personaDescription') {
+    return preset.settings.persona_description || null;
+  }
+  if (block.identifier === 'dialogueExamples') {
+    return preset.settings.dialogue_examples || null;
+  }
+  if (block.identifier === 'chatHistory') {
+    return null; // handled in the walker
+  }
+
+  // Custom identifier → look up in preset prompts[] array
+  const prompts = (preset.settings.prompts || []) as Array<{
+    identifier: string;
+    content?: string;
+  }>;
+  const custom = prompts.find(p => p.identifier === block.identifier);
+  if (custom?.content !== undefined) return custom.content;
+
+  // Fallback: direct settings lookup
+  const direct = preset.settings[block.identifier];
+  if (typeof direct === 'string' && direct.trim()) return direct;
+
+  // If block has its own content (from structuredPreset)
+  if (block.content && block.content.trim()) return block.content;
+
+  return null;
 }
 
 // ========== Helpers ==========
@@ -357,7 +328,6 @@ function buildMacroContext(args: {
   };
 }
 
-/** Build PromptBlock[] from legacy preset.settings.prompt_order + prompts for backward compat. */
 function buildLegacyPromptBlocks(preset: ChatPreset): PromptBlock[] {
   const promptOrder = (preset.settings.prompt_order || []) as Array<{
     identifier: string;
@@ -366,49 +336,19 @@ function buildLegacyPromptBlocks(preset: ChatPreset): PromptBlock[] {
     enabled?: boolean;
   }>;
 
-  const prompts = (preset.settings.prompts || []) as Array<{
-    identifier: string;
-    role?: 'system' | 'user' | 'assistant';
-    content?: string;
-  }>;
-
   const blocks: PromptBlock[] = [];
 
   for (let i = 0; i < promptOrder.length; i++) {
     const item = promptOrder[i];
     if (item.enabled === false) continue;
-
-    // Resolve content
-    let content = '';
-    if (item.identifier === 'charDescription') {
-      content = preset.settings.character_description || '';
-    } else if (item.identifier === 'charPersonality') {
-      content = preset.settings.character_personality || '';
-    } else if (item.identifier === 'scenario') {
-      content = preset.settings.scenario || '';
-    } else if (item.identifier === 'worldInfoBefore' || item.identifier === 'worldInfoAfter') {
-      continue; // handled by lorebook matching
-    } else if (item.identifier === 'chatHistory') {
-      continue; // handled by history
-    } else {
-      const custom = prompts.find(p => p.identifier === item.identifier);
-      if (custom?.content) {
-        content = custom.content;
-      } else {
-        const direct = preset.settings[item.identifier];
-        if (typeof direct === 'string') content = direct;
-      }
-    }
-
-    if (!content.trim()) continue;
-
+    // Only include blocks that have content or are dynamic
     blocks.push({
       name: item.name || item.identifier,
       identifier: item.identifier,
-      content,
+      content: '', // resolved dynamically in resolveBlockContent
       enabled: true,
       role: item.role || 'system',
-      injection_position: 1, // default after_char
+      injection_position: 1,
       injection_depth: 0,
       order: i,
     });
@@ -417,28 +357,15 @@ function buildLegacyPromptBlocks(preset: ChatPreset): PromptBlock[] {
   return blocks;
 }
 
-interface MacroContext {
-  userName: string;
-  characterName: string;
-  userInput: string;
-  variables?: Record<string, string | number>;
-}
-
-/**
- * Replace macros in a template string. Uses the macro registry when available,
- * falling back to legacy hardcoded behavior for backwards compatibility.
- */
 export function replaceMacros(
   template: string,
   context: MacroContext,
   registry?: MacroRegistry,
 ): string {
-  // If a registry is provided, delegate resolution to it
   if (registry && registry.enabled) {
     return registry.replaceAll(template, context);
   }
 
-  // Legacy fallback (no registry) — keep existing behavior
   let result = template
     .replace(/\{\{user\}\}/g, context.userName)
     .replace(/\{\{char\}\}/g, context.characterName)
