@@ -170,6 +170,7 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
     // --- Subsequent entries ---
     if (role === 'system') {
       // System AFTER first message → CONVERT to user
+      usedRoles.add('user'); // mark user as used so subsequent genuine user entries merge
       if (curRole === 'user') {
         curContent += '\n\n' + resolved;
       } else {
@@ -215,9 +216,11 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
     messages.unshift({ role: 'system', content: '\n' });
   }
 
-  // Append user input as final message
+  // Append user input if not already included via chatHistory
   const resolvedUserInput = replaceMacros(userInput, macroCtx, macroRegistry);
-  emitMessage(messages, { role: 'user', content: resolvedUserInput });
+  if (!hasChatHistory) {
+    emitMessage(messages, { role: 'user', content: resolvedUserInput });
+  }
 
   const systemPrompt = messages
     .filter(m => m.role === 'system')
