@@ -252,7 +252,7 @@ function toggleExpand(b: any) { b._expanded = !b._expanded; }
 function addBlock() {
   editData.promptBlocks.push({
     name: '新提示词块',
-    identifier: `block_${Date.now()}`,
+    identifier: crypto.randomUUID(),
     content: '',
     enabled: true,
     role: 'system',

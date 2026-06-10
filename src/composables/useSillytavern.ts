@@ -270,8 +270,14 @@ export function useSillytavern() {
         logError(String(err));
         throw err;
       }
+      // Merge setvar variables into chat variables (accumulated during macro replacement)
+      let mergedVars = currentVariables;
+      if (assembleResult.setVars && Object.keys(assembleResult.setVars).length > 0) {
+        mergedVars = mergeVariables(currentVariables, assembleResult.setVars as Record<string, string | number>);
+      }
+
       const { cleanedText: reply, updates: extractedVars } = extractVariables(rawReply);
-      const nextVariables = mergeVariables(currentVariables, extractedVars);
+      const nextVariables = mergeVariables(mergedVars, extractedVars);
 
       // 7. Add assistant reply to conversation tree
       const sentContent = assembleResult.prompt || JSON.stringify(assembleResult.messages);

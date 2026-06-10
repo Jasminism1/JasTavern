@@ -37,6 +37,8 @@ export interface MacroContext {
   scenario?: string;
   /** Generic bag for custom macros */
   extra?: Record<string, any>;
+  /** Accumulated setvar calls during macro replacement. Callers should merge into chat.variables. */
+  setVars?: Record<string, string>;
 }
 
 const MAX_RECURSIVE_DEPTH = 3;
@@ -146,6 +148,28 @@ export class MacroRegistry {
     }
 
     return template.replace(/\{\{([^{}]+)\}\}/g, (_match, rawKey) => {
+      const raw = String(rawKey).trim();
+
+      // Handle {{setvar::name::value}} — side-effect-only, returns ''
+      if (raw.startsWith('setvar::')) {
+        const parts = raw.split('::');
+        if (parts.length >= 3) {
+          const varName = parts[1].trim();
+          const varValue = parts.slice(2).join('::').trim();
+          if (ctx.setVars) {
+            ctx.setVars[varName] = varValue;
+          }
+        }
+        return '';
+      }
+
+      // Handle {{getvar::name}} — read from variables
+      if (raw.startsWith('getvar::')) {
+        const varName = raw.split('::').slice(1).join('::').trim();
+        if (ctx.variables && varName in ctx.variables) return String(ctx.variables[varName]);
+        if (ctx.setVars && varName in ctx.setVars) return String(ctx.setVars[varName]);
+        return '';
+      }
       const key = String(rawKey).trim();
 
       // Try variable first ({{hp}}, {{gold}} style numeric vars)
@@ -217,8 +241,8 @@ export function createDefaultRegistry(): MacroRegistry {
     handler: (ctx) => ctx.lastMessage ?? null, enabled: true,
   });
   reg.register({
-    name: 'lastUserMessage', description: '最后一条用户消息', category: 'context',
-    handler: (ctx) => ctx.lastUserMessage ?? null, enabled: true,
+    name: 'lastUserMessage', description: '本轮用户消息', category: 'context',
+    handler: (ctx) => ctx.userInput ?? null, enabled: true,
   });
   reg.register({
     name: 'lastCharMessage', description: '最后一条 AI 消息', category: 'context',

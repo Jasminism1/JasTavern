@@ -205,6 +205,9 @@ export function importPreset(data: unknown): ImportResult {
   const flatOrderItems: Array<{ identifier: string; enabled: boolean }> = [];
   if (promptOrderRaw) {
     for (const entry of promptOrderRaw) {
+      // Skip character_id 100000 — system default blueprint, not user config
+      const cid = asNumber(entry.character_id, -1);
+      if (cid === 100000) continue;
       const orderArr = entry.order;
       if (Array.isArray(orderArr)) {
         for (const item of orderArr as Array<Record<string, unknown>>) {

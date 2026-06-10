@@ -38,6 +38,8 @@ export interface AssembleResult {
   matchedEntries: MatchedEntry[];
   systemPrompt: string;
   stopSequences: string[];
+  /** Variables accumulated via {{setvar::name::value}} during assembly. Merge into chat.variables. */
+  setVars: Record<string, string>;
 }
 
 /** Output role — maps system/user/assistant for message grouping. */
@@ -100,16 +102,36 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
     : buildLegacyPromptBlocks(preset)
   ).sort((a, b) => a.order - b.order);
 
-  // ---- 6. Walk prompt blocks, resolve content, group by role ----
-  const assembledMessages: { role: OutputRole; content: string }[] = [];
+  // ---- 6. SillyTavern role alternation algorithm ----
+  // Walk blocks in order. First role → first message. New role → new message.
+  // Already-used role → merge into current message.
+  // setvar blocks are side-effects only, never emitted.
+  const messages: { role: OutputRole; content: string }[] = [];
+  const usedRoles = new Set<OutputRole>();
+  let curRole: OutputRole | null = null;
+  let curContent = '';
   let hasChatHistory = false;
 
   for (const block of promptBlocks) {
-    // Skip chatHistory blocks — we handle history insertion separately
+    // chatHistory — inject conversation history
     if (block.identifier === 'chatHistory') {
       hasChatHistory = true;
+      // Finish current message before inserting history
+      if (curContent.trim()) {
+        messages.push({ role: curRole!, content: curContent.trim() });
+        curContent = '';
+      }
       for (const h of recentHistory) {
-        emitMessage(assembledMessages, { role: h.role, content: h.content });
+        pushMessage(messages, usedRoles, { role: h.role, content: h.content }, curRole, curContent);
+        // Update curRole/curContent from pushMessage's side effects...
+        // Actually pushMessage handles the alternation internally.
+      }
+      // After chatHistory, we need to continue with the next block
+      // Reset tracking so the next block starts fresh
+      if (messages.length > 0) {
+        curRole = messages[messages.length - 1].role;
+        curContent = '';
+        usedRoles.add(curRole);
       }
       continue;
     }
@@ -123,30 +145,60 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
     const resolved = replaceMacros(rawContent, macroCtx, macroRegistry);
     if (!resolved.trim()) continue;
 
-    emitMessage(assembledMessages, { role: block.role, content: resolved });
+    // SillyTavern alternation: first role → first msg, new role → new msg, same/used → merge
+    const role = block.role;
+
+    if (curRole === null) {
+      // First block
+      curRole = role;
+      curContent = resolved;
+      usedRoles.add(role);
+    } else if (role === curRole) {
+      // Same role — append
+      curContent += '\n\n' + resolved;
+    } else if (!usedRoles.has(role)) {
+      // New role, not yet used — start new message
+      if (curContent.trim()) {
+        messages.push({ role: curRole, content: curContent.trim() });
+      }
+      curRole = role;
+      curContent = resolved;
+      usedRoles.add(role);
+    } else {
+      // Role already used — merge into current message
+      curContent += '\n\n' + resolved;
+    }
+  }
+
+  // Push final message
+  if (curContent.trim()) {
+    messages.push({ role: curRole!, content: curContent.trim() });
   }
 
   // If chatHistory wasn't inserted, append it now
   if (!hasChatHistory) {
     for (const h of recentHistory) {
-      emitMessage(assembledMessages, { role: h.role, content: h.content });
+      pushMessage(messages, usedRoles, { role: h.role, content: h.content }, curRole, curContent);
+    }
+    if (messages.length > 0) {
+      curRole = messages[messages.length - 1].role;
     }
   }
 
-  // ---- 7. Finalize: ensure system at top, no consecutive same-role ----
-  const finalized = normalizeMessages(assembledMessages);
+  // ---- 7. Ensure system message at top ----
+  const finalMessages = ensureSystemTop(messages);
 
-  // Append user input as final message
+  // Append user input as final message (always a user message)
   const resolvedUserInput = replaceMacros(userInput, macroCtx, macroRegistry);
-  emitMessage(finalized, { role: 'user', content: resolvedUserInput });
+  emitMessage(finalMessages, { role: 'user', content: resolvedUserInput });
 
-  const systemPrompt = finalized
+  const systemPrompt = finalMessages
     .filter(m => m.role === 'system')
     .map(m => m.content)
     .join('\n\n');
 
   // ---- 8. Context template serialization ----
-  let finalMessages = finalized;
+  let outputMessages = finalMessages;
   let finalPrompt: string | undefined;
   let stopSeqs: string[] = [];
 
@@ -156,8 +208,8 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
     const wiAfter = uniqueEntries.filter(e => e.entry.position === 'at_depth')
       .map(e => replaceMacros(e.entry.content, macroCtx, macroRegistry)).join('\n\n');
     const result = serializeContext({
-      systemMessages: finalized.filter(m => m.role === 'system'),
-      history: finalized.filter(m => m.role !== 'system' && m.role !== 'user'),
+      systemMessages: finalMessages.filter(m => m.role === 'system'),
+      history: finalMessages.filter(m => m.role !== 'system' && m.role !== 'user'),
       userInput: resolvedUserInput,
       wiBefore,
       wiAfter,
@@ -165,7 +217,7 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
     });
     if (result.prompt) {
       finalPrompt = result.prompt;
-      finalMessages = [];
+      outputMessages = [];
     }
     stopSeqs = result.stop;
   }
@@ -174,20 +226,18 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
   stopSeqs = [...new Set([...stopSeqs, ...presetStops])];
 
   return {
-    messages: finalMessages,
+    messages: outputMessages,
     prompt: finalPrompt,
     matchedEntries: uniqueEntries,
     systemPrompt,
     stopSequences: stopSeqs,
+    setVars: macroCtx.setVars || {},
   };
 }
 
-// ========== Message emitter ==========
+// ========== Message helpers ==========
 
-/**
- * Add a message to the list. If the last message has the same role,
- * append content to it instead of creating a new message.
- */
+/** Simple emit: merge same-role consecutive messages. */
 function emitMessage(
   list: { role: OutputRole; content: string }[],
   msg: { role: OutputRole; content: string },
@@ -201,61 +251,50 @@ function emitMessage(
   }
 }
 
-/**
- * Ensure good structure:
- * 1. At most one system message, always at the top
- * 2. After system, first non-system message MUST be 'user'
- * 3. No consecutive same-role messages
- */
-function normalizeMessages(
+/** Push a message respecting ST alternation rules. */
+function pushMessage(
+  list: { role: OutputRole; content: string }[],
+  usedRoles: Set<OutputRole>,
+  msg: { role: OutputRole; content: string },
+  _curRole: OutputRole | null,
+  _curContent: string,
+): void {
+  if (!msg.content.trim()) return;
+
+  if (!usedRoles.has(msg.role)) {
+    // New role — start a new message
+    list.push({ role: msg.role, content: msg.content });
+    usedRoles.add(msg.role);
+  } else {
+    // Already-used role — merge into last message
+    const last = list[list.length - 1];
+    if (last) {
+      last.content += '\n\n' + msg.content;
+    } else {
+      list.push({ role: msg.role, content: msg.content });
+    }
+  }
+}
+
+/** Ensure exactly one system message at the top. If none, prepend empty system. */
+function ensureSystemTop(
   msgs: { role: OutputRole; content: string }[],
 ): { role: OutputRole; content: string }[] {
-  if (msgs.length === 0) return [];
-
-  // Collect ALL system content into one top-level system message
   const result: { role: OutputRole; content: string }[] = [];
   let sysContent = '';
-  const nonSystem: { role: OutputRole; content: string }[] = [];
 
   for (const m of msgs) {
     if (m.role === 'system') {
       sysContent += (sysContent ? '\n\n' : '') + m.content;
     } else {
-      nonSystem.push(m);
+      result.push(m);
     }
   }
 
-  // Merge consecutive same-role in non-system messages
-  for (const m of nonSystem) {
-    emitMessage(result, m);
-  }
+  // Always prepend system — use empty content if none found
+  result.unshift({ role: 'system', content: sysContent || '\n\n\n\n\n\n' });
 
-  // Ensure first non-system message is 'user' — if it's 'assistant',
-  // insert an empty user message or move system before it
-  // Actually: just ensure the sequence alternates
-  const finalized: { role: OutputRole; content: string }[] = [];
-  let lastRole: OutputRole | null = null;
-  for (const m of result) {
-    if (lastRole === m.role && m.role !== 'system') {
-      // Merge with previous
-      const prev = finalized[finalized.length - 1];
-      prev.content += '\n\n' + m.content;
-    } else {
-      finalized.push(m);
-      lastRole = m.role;
-    }
-  }
-
-  // Prepend system message
-  if (sysContent.trim()) {
-    finalized.unshift({ role: 'system', content: sysContent });
-  }
-
-  // If after system, the first message is 'assistant', that's a problem.
-  // SillyTavern convention: system → user is always the start.
-  // If this happens, we keep it as-is but it's a configuration warning.
-
-  return finalized;
+  return result;
 }
 
 // ========== Content resolvers ==========
@@ -352,6 +391,7 @@ function buildMacroContext(args: {
     lastMessage: lastAnyMsg?.content ?? null,
     lastUserMessage: lastUserMsg?.content ?? null,
     lastCharMessage: lastCharMsg?.content ?? null,
+    setVars: {}, // populated during macro replacement, read by caller
   };
 }
 
