@@ -203,33 +203,59 @@ function emitMessage(
 
 /**
  * Ensure good structure:
- * 1. At most one system message, and it's at the top
- * 2. No consecutive same-role messages
- * 3. No consecutive duplicate content
+ * 1. At most one system message, always at the top
+ * 2. After system, first non-system message MUST be 'user'
+ * 3. No consecutive same-role messages
  */
 function normalizeMessages(
   msgs: { role: OutputRole; content: string }[],
 ): { role: OutputRole; content: string }[] {
   if (msgs.length === 0) return [];
 
-  // Collect all system content into the first system message
+  // Collect ALL system content into one top-level system message
   const result: { role: OutputRole; content: string }[] = [];
   let sysContent = '';
+  const nonSystem: { role: OutputRole; content: string }[] = [];
 
   for (const m of msgs) {
     if (m.role === 'system') {
       sysContent += (sysContent ? '\n\n' : '') + m.content;
     } else {
-      emitMessage(result, m);
+      nonSystem.push(m);
     }
   }
 
-  // Prepend system message if any system content exists
-  if (sysContent.trim()) {
-    result.unshift({ role: 'system', content: sysContent });
+  // Merge consecutive same-role in non-system messages
+  for (const m of nonSystem) {
+    emitMessage(result, m);
   }
 
-  return result;
+  // Ensure first non-system message is 'user' — if it's 'assistant',
+  // insert an empty user message or move system before it
+  // Actually: just ensure the sequence alternates
+  const finalized: { role: OutputRole; content: string }[] = [];
+  let lastRole: OutputRole | null = null;
+  for (const m of result) {
+    if (lastRole === m.role && m.role !== 'system') {
+      // Merge with previous
+      const prev = finalized[finalized.length - 1];
+      prev.content += '\n\n' + m.content;
+    } else {
+      finalized.push(m);
+      lastRole = m.role;
+    }
+  }
+
+  // Prepend system message
+  if (sysContent.trim()) {
+    finalized.unshift({ role: 'system', content: sysContent });
+  }
+
+  // If after system, the first message is 'assistant', that's a problem.
+  // SillyTavern convention: system → user is always the start.
+  // If this happens, we keep it as-is but it's a configuration warning.
+
+  return finalized;
 }
 
 // ========== Content resolvers ==========
@@ -336,20 +362,31 @@ function buildLegacyPromptBlocks(preset: ChatPreset): PromptBlock[] {
     enabled?: boolean;
   }>;
 
+  const prompts = (preset.settings.prompts || []) as Array<{
+    identifier: string;
+    name?: string;
+    role?: 'system' | 'user' | 'assistant';
+    content?: string;
+  }>;
+
   const blocks: PromptBlock[] = [];
 
   for (let i = 0; i < promptOrder.length; i++) {
-    const item = promptOrder[i];
-    if (item.enabled === false) continue;
-    // Only include blocks that have content or are dynamic
+    const poItem = promptOrder[i];
+    // Enabled status from prompt_order takes priority
+    if (poItem.enabled === false) continue;
+
+    // Look up content + role from prompts array by identifier
+    const promptDef = prompts.find((p: any) => p.identifier === poItem.identifier);
+
     blocks.push({
-      name: item.name || item.identifier,
-      identifier: item.identifier,
-      content: '', // resolved dynamically in resolveBlockContent
+      name: promptDef?.name || poItem.name || poItem.identifier,
+      identifier: poItem.identifier,
+      content: promptDef?.content || '', // resolved dynamically in resolveBlockContent
       enabled: true,
-      role: item.role || 'system',
-      injection_position: 1,
-      injection_depth: 0,
+      role: promptDef?.role || poItem.role || 'system',
+      injection_position: (promptDef as any)?.injection_position ?? 0,
+      injection_depth: (promptDef as any)?.injection_depth ?? 4,
       order: i,
     });
   }

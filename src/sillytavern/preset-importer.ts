@@ -189,9 +189,44 @@ export function importPreset(data: unknown): ImportResult {
   }
   const messaging = parseMessagingParams(messagingRaw);
 
-  // Prompt blocks — accept prompts array or promptBlocks array
-  let blocksRaw: unknown = obj.promptBlocks ?? obj.prompts;
-  const promptBlocks = parsePromptBlocks(blocksRaw);
+  // Prompt blocks — use prompt_order as canonical order + enabled, prompts for content
+  // Community ST presets: "prompt_order" defines the SEQUENCE and enabled status.
+  //   "prompts" stores content. prompt_order overrides prompts.enabled.
+  //   If no prompt_order, fall back to prompts directly.
+  const promptOrder = Array.isArray(obj.prompt_order) ? obj.prompt_order as Array<Record<string, unknown>> : null;
+  const promptsRaw = Array.isArray(obj.prompts) ? obj.prompts as Array<Record<string, unknown>> : null;
+  const promptBlocksRaw = Array.isArray(obj.promptBlocks) ? obj.promptBlocks : null;
+
+  let promptBlocks: PromptBlock[];
+
+  if (promptOrder && promptsRaw) {
+    // Community ST format: walk prompt_order, look up content in prompts
+    promptBlocks = promptOrder.map((poItem, i) => {
+      const id = asString(poItem.identifier, '');
+      const match = promptsRaw.find((p: any) => p?.identifier === id) || ({} as Record<string, unknown>);
+      const isEnabled = poItem.enabled !== undefined ? asBoolean(poItem.enabled, true) : asBoolean(match.enabled, true);
+      const block: PromptBlock = {
+        name: asString(match.name || poItem.name, id || `块${i + 1}`),
+        identifier: id,
+        content: asString(match.content, ''),
+        enabled: isEnabled,
+        role: asRole(match.role || poItem.role),
+        injection_position: asNumber(match.injection_position ?? match.position, 0),
+        injection_depth: asNumber(match.injection_depth ?? match.depth, 4),
+        order: i,
+      };
+      return block;
+    });
+    warnings.push('已按 prompt_order 顺序导入 ' + promptBlocks.length + ' 个提示词块');
+  } else if (promptBlocksRaw) {
+    // Our own export format: promptBlocks array
+    promptBlocks = parsePromptBlocks(promptBlocksRaw);
+  } else if (promptsRaw) {
+    // Fallback: walk prompts directly (no prompt_order)
+    promptBlocks = parsePromptBlocks(promptsRaw);
+  } else {
+    promptBlocks = [];
+  }
 
   // Validate stop — warn if empty (critical for preventing infinite loops)
   if (sampling.stop.length === 0) {
