@@ -21,7 +21,39 @@ function addLog(direction: LogEntry['direction'], label: string, detail: string)
 }
 
 export function logRequest(endpoint: string, body: any) {
-  addLog('request', `POST ${endpoint}`, JSON.stringify(body, null, 2));
+  // Format messages array with each entry on its own line, proper \n display
+  const detail = typeof body === 'object' && body.messages
+    ? formatMessages(body)
+    : JSON.stringify(body, null, 2);
+  addLog('request', `POST ${endpoint}`, detail);
+}
+
+function formatMessages(body: any): string {
+  const parts: string[] = [];
+  parts.push('{');
+  parts.push(`  "model": ${JSON.stringify(body.model)},`);
+  parts.push(`  "messages": [`);
+  for (let i = 0; i < body.messages.length; i++) {
+    const m = body.messages[i];
+    const role = m.role;
+    // Show content with actual newlines visible
+    const contentPreview = m.content
+      .replace(/\\n/g, '\n')  // un-escape JSON \n
+      .slice(0, 200);          // truncate long content
+    const suffix = m.content.length > 200 ? '...' : '';
+    parts.push(`    { role: "${role}", content: ${JSON.stringify(contentPreview + suffix)} }`);
+    if (i < body.messages.length - 1) parts[parts.length - 1] += ',';
+  }
+  parts.push('  ]');
+  if (body.temperature !== undefined) parts[parts.length - 1] += ',';
+  // Include other params
+  for (const key of ['temperature','top_p','max_tokens','stream','stop','frequency_penalty','presence_penalty']) {
+    if (body[key] !== undefined) {
+      parts.push(`  "${key}": ${JSON.stringify(body[key])},`);
+    }
+  }
+  parts.push('}');
+  return parts.join('\n');
 }
 
 export function logResponse(status: number, body: any) {
